@@ -61,6 +61,7 @@ mod magnet;
 mod magnifier;
 mod matrix;
 mod mcp;
+mod mirror;
 pub mod model;
 pub mod motion;
 mod moving;

@@ -102,7 +102,11 @@ impl App {
         let arrangement = column![
             container(drawing).style(boxed(crate::theme::ink(rgba(0, 0, 0, 0.20)), 8.0, None)),
             container(t(
-                self.say(words::DRAG_A_SCREEN_AGAINST_THE_OTHER),
+                if self.mirrored() {
+                    self.say(words::EACH_SCREEN_KEEPS_ITS_PLACE_FOR_LATER)
+                } else {
+                    self.say(words::DRAG_A_SCREEN_AGAINST_THE_OTHER)
+                },
                 12.0,
                 FAINT.get(),
             ),)
@@ -136,17 +140,53 @@ impl App {
             None,
             self.menu_control(PRIMARY),
         ));
-        all = all.push(divided(
-            true,
-            self.screen_row(
-                MIRROR,
-                self.say(words::MIRRORING),
-                Some(self.say(words::SHOW_THE_SAME_PICTURE_ON_BOTH).to_owned()),
-                None,
-                Some(later(lang)),
-                switch(false, true, false, 1.0, None),
-            ),
-        ));
+        // "Deux écrans : Étendre | Recopier", with two screens on or more
+        // (#931); "Montrer" under it while mirrored.
+        if let Some(known) = self.screens_list().filter(|k| k.on().count() >= 2) {
+            let name = if known.on().count() > 2 {
+                words::SEVERAL_SCREENS
+            } else {
+                words::TWO_SCREENS
+            };
+            let line = match known.shown() {
+                Some(shown) => {
+                    let lower = |s: &Screen| screens::lower_first(&s.title(lang));
+                    let mirrors: Vec<String> = known.mirrors().map(lower).collect();
+                    words::the_shows_the(
+                        lang,
+                        words::TheShowsThe {
+                            mirror: &mirrors.join(", "),
+                            shown: &lower(shown),
+                        },
+                    )
+                }
+                None => self.say(words::EACH_SCREEN_HAS_ITS_OWN_WINDOWS).to_owned(),
+            };
+            all = all.push(divided(
+                true,
+                self.screen_row(
+                    MIRROR,
+                    self.say(name),
+                    Some(line),
+                    None,
+                    None,
+                    self.mirror_control(),
+                ),
+            ));
+            if known.shown.is_some() {
+                all = all.push(divided(
+                    true,
+                    self.screen_row(
+                        SHOW,
+                        self.say(words::SHOW),
+                        None,
+                        None,
+                        None,
+                        self.menu_control(SHOW),
+                    ),
+                ));
+            }
+        }
         page = page.push(
             column![
                 row![label(self.say(words::ALL_SCREENS))]
@@ -321,6 +361,55 @@ impl App {
         let on = known.on().count();
         let now = self.now;
         let mut out = Vec::new();
+        // Mirrored (#931): one box at the shown screen's size, "1 · 2 ·
+        // Les deux écrans", the others outlines behind it, 10 px right
+        // and 8 px up.
+        if let Some(shown) = known.shown() {
+            let rect = view.rect_of(shown.rect());
+            let numbers: Vec<String> = known.on().map(|s| s.number.to_string()).collect();
+            for other in known.mirrors() {
+                out.push(Drawn {
+                    name: other.name.clone(),
+                    number: String::new(),
+                    rect: Rectangle {
+                        x: rect.x + 10.0,
+                        y: rect.y - 8.0,
+                        ..rect
+                    },
+                    selected: false,
+                    dashed: Some(String::new()),
+                    title: String::new(),
+                    line: String::new(),
+                    bar: None,
+                    lifted: false,
+                    outline: true,
+                });
+            }
+            let width = if shown.size.0 >= FULL_FROM {
+                196.0
+            } else {
+                56.0
+            };
+            let f = view.f;
+            out.push(Drawn {
+                name: shown.name.clone(),
+                number: numbers.join(" · "),
+                rect,
+                selected: true,
+                dashed: None,
+                title: self.say(words::BOTH_SCREENS).to_owned(),
+                line: self.say(words::SAME_PICTURE).to_owned(),
+                bar: Some(Rectangle {
+                    x: rect.x + rect.width - (8.0 + width) * f,
+                    y: rect.y + 8.0 * f,
+                    width: width * f,
+                    height: (rect.height - 16.0 * f).max(0.0),
+                }),
+                lifted: false,
+                outline: false,
+            });
+            return out;
+        }
         for s in &known.list {
             let mut rect = view.rect_of(s.rect());
             let mut lifted = false;
@@ -379,7 +468,7 @@ impl App {
             });
             out.push(Drawn {
                 name: s.name.clone(),
-                number: s.number,
+                number: s.number.to_string(),
                 rect,
                 selected: chosen.as_deref() == Some(s.name.as_str()) && s.connected,
                 dashed,
@@ -387,6 +476,7 @@ impl App {
                 line,
                 bar,
                 lifted,
+                outline: false,
             });
         }
         out
@@ -550,6 +640,12 @@ impl App {
         if logical_size.0 < FULL_FROM {
             scale_line.push_str(self.say(words::THE_BAR_TAKES_ITS_MINI_FORM));
         }
+        // A mirror's scale is the screen it shows (#931).
+        if screen.mirrors.is_some()
+            && let Some(shown) = self.screens_list().and_then(Screens::shown)
+        {
+            scale_line = words::the_s(lang, screens::lower_first(&shown.title(lang)));
+        }
         let vrr_line = if screen.vrr_capable {
             self.say(words::THE_PICTURE_FOLLOWS_GAMES_AND_VIDEOS)
         } else {
@@ -615,6 +711,9 @@ impl App {
 
     /// The line under "Écran principal", and its warning.
     pub(super) fn primary_line(&self) -> (String, Option<String>) {
+        if self.mirrored() {
+            return (self.say(words::THE_ONE_SHOWN).to_owned(), None);
+        }
         let line = self.say(words::THE_BAR_AND_NEW_WINDOWS_GO).to_owned();
         let warn = self.primary_named().and_then(|name| {
             let known = self.screens_list()?;
@@ -649,6 +748,57 @@ impl App {
             Some(Message::Screens(Msg::Toggle(row))),
         ))
         .id(format!("control:{row}"))
+        .into()
+    }
+
+    /// « Étendre | Recopier » (#931): the page's segmented control.
+    pub(super) fn mirror_control(&self) -> El<'_> {
+        let inert = self.screens_row_inert(MIRROR);
+        let alpha = if inert { INERT } else { 1.0 };
+        let mirrored = self.mirrored();
+        let focused = self.focused(&Control::Row(MIRROR));
+        let mut segments = row![];
+        for (i, (label, on)) in [(words::EXTEND, false), (words::MIRROR, true)]
+            .into_iter()
+            .enumerate()
+        {
+            let chosen = on == mirrored;
+            let colour = if chosen { TEXT.get() } else { DIM.get() };
+            let word = t(self.say(label), 12.5, fade(colour, alpha)).font(SEMIBOLD);
+            let mut segment =
+                button(word)
+                    .height(26)
+                    .padding([4, 12])
+                    .style(move |_, _| button::Style {
+                        background: chosen.then(|| {
+                            Background::Color(fade(Ink::Token(|t| t.segment_chosen).get(), alpha))
+                        }),
+                        text_color: TEXT.get(),
+                        border: border(7.0, 0.0, Color::TRANSPARENT),
+                        ..button::Style::default()
+                    });
+            if !inert && !chosen {
+                segment = segment.on_press(Message::Screens(Msg::Mirror(on)));
+            }
+            segments = segments.push(container(segment).id(format!("segment:{MIRROR}:{i}")));
+        }
+        container(
+            container(segments)
+                .padding(2)
+                .style(move |_: &Theme| container::Style {
+                    background: Some(Background::Color(fade(
+                        Ink::Token(|t| t.segmented).get(),
+                        alpha,
+                    ))),
+                    border: if focused {
+                        ring(9.0)
+                    } else {
+                        border(9.0, 0.0, Color::TRANSPARENT)
+                    },
+                    ..container::Style::default()
+                }),
+        )
+        .id(format!("control:{MIRROR}"))
         .into()
     }
 
@@ -969,7 +1119,8 @@ impl App {
             .map(|d| {
                 serde_json::json!({
                     "name": d.name,
-                    "number": d.number,
+                    // A number, or "1 · 2" mirrored (#931).
+                    "number": d.number.parse::<u64>().map_or_else(|_| serde_json::Value::from(d.number.clone()), serde_json::Value::from),
                     "at": [d.rect.x.round(), d.rect.y.round(), d.rect.width.round(), d.rect.height.round()],
                     "selected": d.selected,
                     "state": d.dashed,
@@ -1003,7 +1154,20 @@ impl App {
                 .collect()
         });
         let chosen = self.chosen();
+        // Mirroring (#931): the row, its value, "Montrer".
+        let mirror = self
+            .screens_list()
+            .filter(|k| k.on().count() >= 2)
+            .map(|known| {
+                let shown = known.shown().map(|s| s.title(lang));
+                serde_json::json!({
+                    "value": if shown.is_some() { "mirror" } else { "extend" },
+                    "show": shown,
+                    "inert": self.screens_row_inert(MIRROR),
+                })
+            });
         serde_json::json!({
+            "mirror": mirror,
             "known": self.screens.known.is_some(),
             "unavailable": self.screens.unavailable,
             "drawn": drawn,

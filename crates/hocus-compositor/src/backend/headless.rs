@@ -381,6 +381,7 @@ where
             output.user_data().insert_if_missing(|| identity);
         }
         let global = output.create_global::<State>(&state.display_handle);
+        crate::mirror::keep_global(&output, global.clone());
         let mode = Mode {
             size: (spec.width, spec.height).into(),
             refresh: REFRESH_MHZ,

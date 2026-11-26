@@ -110,6 +110,10 @@ pub enum ToCompositor {
     /// The user clicked the panda that says screens moved
     /// ([`ToShell::ScreensMoved`](crate::ToShell::ScreensMoved)): it goes back.
     PeekClose,
+    /// The new screens' bubble's « Recopier » (`true`), or the « Recopie »
+    /// sign's « Arrêter la recopie » (`false`) (#931): the screens mirror,
+    /// or extend again, and their set keeps that choice.
+    Mirror(bool),
     /// How near the next meeting is (bar.md §6, Day.2), for the halo: in 10 min
     /// or less, in 2 min or less, or neither (none, further, in progress, or
     /// opened by the user).

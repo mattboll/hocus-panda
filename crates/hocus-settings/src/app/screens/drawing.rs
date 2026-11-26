@@ -117,6 +117,16 @@ impl canvas::Program<Message> for Drawing {
         for d in order {
             let r = d.rect;
             let path = canvas::Path::rounded_rectangle(r.position(), r.size(), 6.0.into());
+            // The mirror behind the screen shown (#931): its outline alone.
+            if d.outline {
+                frame.stroke(
+                    &path,
+                    canvas::Stroke::default()
+                        .with_color(crate::theme::ink(rgba(169, 178, 194, 0.45)))
+                        .with_width(1.5),
+                );
+                continue;
+            }
             if d.lifted {
                 let shadow = canvas::Path::rounded_rectangle(
                     Point::new(r.x + 2.0, r.y + 6.0),
@@ -175,7 +185,9 @@ impl canvas::Program<Message> for Drawing {
                 );
             }
             // The number's disc, the name, the mode.
-            let disc = Point::new(r.x + 8.0 + 9.0, r.y + 8.0 + 9.0);
+            // "1 · 2" mirrored: a pill as wide as it says.
+            let wide = (d.number.chars().count() as f32 * 6.5).max(18.0);
+            let disc = Point::new(r.x + 8.0 + wide / 2.0, r.y + 8.0 + 9.0);
             let (fill, ink) = if d.selected {
                 (ACCENT.get(), DEEP)
             } else {
@@ -186,7 +198,14 @@ impl canvas::Program<Message> for Drawing {
             } else {
                 (fill, ink)
             };
-            frame.fill(&canvas::Path::circle(disc, 9.0), fade(fill, alpha));
+            frame.fill(
+                &canvas::Path::rounded_rectangle(
+                    Point::new(disc.x - wide / 2.0, disc.y - 9.0),
+                    Size::new(wide, 18.0),
+                    9.0.into(),
+                ),
+                fade(fill, alpha),
+            );
             frame.fill_text(canvas::Text {
                 content: d.number.to_string(),
                 position: disc,
@@ -199,11 +218,11 @@ impl canvas::Program<Message> for Drawing {
             });
             frame.fill_text(canvas::Text {
                 content: d.title.clone(),
-                position: Point::new(r.x + 33.0, r.y + 10.0),
+                position: Point::new(r.x + 15.0 + wide, r.y + 10.0),
                 color: fade(TEXT.get(), alpha),
                 size: 12.5.into(),
                 font: BOLD,
-                max_width: (r.width - 41.0).max(0.0),
+                max_width: (r.width - 23.0 - wide).max(0.0),
                 ..canvas::Text::default()
             });
             let under = d.dashed.clone().unwrap_or_else(|| d.line.clone());

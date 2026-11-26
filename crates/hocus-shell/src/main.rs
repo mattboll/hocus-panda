@@ -911,6 +911,14 @@ impl Shell {
                 agents::peek::screens(moved);
                 Task::none()
             }
+            ToShell::ScreensNew(new) => {
+                agents::peek::screens_new(new);
+                Task::none()
+            }
+            ToShell::Mirror(shown) => {
+                in_use::set_mirror(shown);
+                Task::none()
+            }
             ToShell::AgentPandas(pandas) => {
                 agents::set_pandas(pandas);
                 Task::none()
@@ -2034,6 +2042,15 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         ToShell::ScreensMoved(moved) => {
                             agents::peek::screens(moved);
+                            continue;
+                        }
+                        ToShell::ScreensNew(new) => {
+                            agents::peek::screens_new(new);
+                            continue;
+                        }
+                        // Mirroring (#931): the in-use sign alone.
+                        ToShell::Mirror(shown) => {
+                            in_use::set_mirror(shown);
                             continue;
                         }
                         // The rows' pandas or dots (6.16): their group

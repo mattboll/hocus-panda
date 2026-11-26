@@ -9,6 +9,13 @@
 //! rate is tried first: the compositor applies it without the file and
 //! takes it back by itself after 15 s, unless "Garder" keeps it (then
 //! written).
+//!
+//! Mirroring (#931): "Deux écrans : Étendre | Recopier" and "Montrer"
+//! ask the compositor over its line (`mirror IDENTITY`, `extend`), which
+//! keeps the choice with the set of screens in its state, not the file;
+//! toasted with "Annuler". While mirrored the drawing shows one box, "1 ·
+//! 2 · Les deux écrans", nothing drags, the primary screen is the one
+//! shown and a mirror's scale and VRR are its.
 
 mod drawing;
 mod night;
@@ -16,6 +23,7 @@ mod view;
 
 use drawing::*;
 use hocus_words::settings::app_screens as words;
+use hocus_words::settings::app_screens_view as view_words;
 
 use std::time::{Duration, Instant};
 
@@ -32,7 +40,7 @@ use crate::{
     model::Icon,
     screens::{
         self, ARRANGE, Align, IDENTIFY, MIRROR, Mode3, PRIMARY, RATE, RESOLUTION, ROTATION, Rect,
-        SCALE, SCALES, SETS, Said, Screen, Screens, Side, USE, VRR,
+        SCALE, SCALES, SETS, SHOW, Said, Screen, Screens, Side, USE, VRR,
     },
     store::{self, KeyEdit},
 };
@@ -80,6 +88,8 @@ pub enum Msg {
     Identified(u64),
     /// A set's row's menu, by the set's name.
     SetMenu(String),
+    /// "Deux écrans": « Recopier » (`true`) or « Étendre » (#931).
+    Mirror(bool),
 }
 
 /// A menu's choice on this page.
@@ -93,6 +103,17 @@ pub enum Choice {
     Primary(Option<String>),
     /// "Oublier cet ensemble": the set, by its name.
     Forget(String),
+    /// "Montrer": the screen shown while mirrored, by its name (#931).
+    Show(String),
+}
+
+/// Mirroring asked of the compositor (#931): the screen shown before and
+/// after, by identity (`None`: extended), and what the toasts say.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::app) struct MirrorChoice {
+    before: Option<String>,
+    after: Option<String>,
+    done: String,
 }
 
 /// A press on a screen of the drawing, until it is let go.
@@ -166,7 +187,8 @@ pub enum Control {
 #[derive(Debug, Clone, PartialEq)]
 struct Drawn {
     name: String,
-    number: usize,
+    /// Its disc's number; "1 · 2" for the screens mirrored (#931).
+    number: String,
     rect: Rectangle,
     selected: bool,
     /// Dashed, with this word: "Éteint", "Couvercle fermé", "Débranché".
@@ -175,6 +197,8 @@ struct Drawn {
     line: String,
     bar: Option<Rectangle>,
     lifted: bool,
+    /// An outline alone, behind the screen shown while mirrored (#931).
+    outline: bool,
 }
 
 impl App {
@@ -221,6 +245,11 @@ impl App {
             Msg::Said(said) => self.screens_said(said),
             Msg::Press(name, at) => {
                 if self.chosen_inert_all() {
+                    return iced::Task::none();
+                }
+                // Mirrored, the screens keep their places (#931).
+                if self.mirrored() {
+                    self.screens.selected = Some(name);
                     return iced::Task::none();
                 }
                 let pluggedin = self
@@ -298,7 +327,9 @@ impl App {
                 self.screens.selected = Some(name);
                 iced::Task::none()
             }
+            Msg::Toggle(MIRROR) => self.screens_update(Msg::Mirror(!self.mirrored())),
             Msg::Toggle(row) => self.screens_toggle(row),
+            Msg::Mirror(on) => self.mirror_ask(on),
             Msg::Menu(row) => {
                 if self.screens_row_inert(row) {
                     return iced::Task::none();
@@ -380,6 +411,24 @@ impl App {
     /// the drawing says them ("Écran du portable · 2560 × 1600").
     fn identify_line(&self) -> Option<String> {
         let lang = self.lang;
+        // Mirrored (#931): "1 · 2" on the screen shown, so on both.
+        if let Some(known) = self.screens_list()
+            && let Some(shown) = known.shown()
+        {
+            let numbers: Vec<String> = known.on().map(|s| s.number.to_string()).collect();
+            let words = format!(
+                "{} · {}",
+                self.say(view_words::BOTH_SCREENS),
+                self.say(view_words::SAME_PICTURE)
+            );
+            let badge = serde_json::json!([{
+                "output": shown.name,
+                "number": shown.number,
+                "words": words,
+                "label": numbers.join(" · "),
+            }]);
+            return Some(format!("identify {badge}"));
+        }
         let badges: Vec<serde_json::Value> = self
             .screens_list()?
             .on()
@@ -552,6 +601,8 @@ impl App {
         let on = known.on().count();
         let lid = screen.lid_closed && on > 0;
         match row {
+            // A mirror's are the screen it shows (#931).
+            SCALE | VRR if screen.mirrors.is_some() => true,
             USE => lid || (screen.enabled && on <= 1),
             RESOLUTION | SCALE => !screen.enabled || lid,
             RATE => {
@@ -562,7 +613,9 @@ impl App {
                         .is_none_or(|m| screen.rates((m.0, m.1)).len() <= 1)
             }
             VRR => !screen.enabled || lid || !screen.vrr_capable,
-            PRIMARY => false,
+            PRIMARY => self.mirrored(),
+            MIRROR => on < 2,
+            SHOW => !self.mirrored(),
             _ => true,
         }
     }
@@ -700,6 +753,16 @@ impl App {
                 iced::Task::none()
             }
             Choice::Forget(_) => iced::Task::none(),
+            Choice::Show(name) => {
+                let key = self
+                    .screens_list()
+                    .and_then(|k| k.get(&name))
+                    .map(|s| s.key.clone());
+                match key {
+                    Some(key) => self.mirror_to(Some(key)),
+                    None => iced::Task::none(),
+                }
+            }
             Choice::Primary(name) => {
                 let said_now = self.say_primary(name.as_deref());
                 let said_then = self.say_primary(self.primary_named().as_deref());
@@ -1058,6 +1121,15 @@ impl App {
                 }
                 list
             }
+            SHOW => self
+                .screens_list()
+                .map(|known| {
+                    known
+                        .on()
+                        .map(|s| (Choice::Show(s.name.clone()), s.title(lang)))
+                        .collect()
+                })
+                .unwrap_or_default(),
             PRIMARY => {
                 let mut list = vec![(Choice::Primary(None), self.say_primary(None))];
                 if let Some(known) = self.screens_list() {
@@ -1082,9 +1154,120 @@ impl App {
             RESOLUTION => screen.mode.map(|m| Choice::Size((m.0, m.1))),
             RATE => screen.mode.map(|m| Choice::Rate(m.2)),
             SCALE => Some(Choice::Scale((!screen.scale_auto).then_some(screen.scale))),
+            // Mirrored, the screen shown is the primary one (#931).
+            PRIMARY if self.mirrored() => Some(Choice::Primary(self.screens_list()?.shown.clone())),
             PRIMARY => Some(Choice::Primary(self.primary_named())),
+            SHOW => Some(Choice::Show(self.screens_list()?.shown.clone()?)),
             _ => None,
         }
+    }
+
+    // --- Mirroring (#931) -----------------------------------------------------------------
+
+    /// Whether the screens are mirrored now.
+    pub(super) fn mirrored(&self) -> bool {
+        self.screens_list().is_some_and(|k| k.shown.is_some())
+    }
+
+    /// « Recopier » (`on`) or « Étendre »: the laptop's screen shown,
+    /// else the primary one, as the compositor's shortcut does.
+    fn mirror_ask(&mut self, on: bool) -> iced::Task<Message> {
+        if self.screens_row_inert(MIRROR) || on == self.mirrored() {
+            return iced::Task::none();
+        }
+        if !on {
+            return self.mirror_to(None);
+        }
+        let key = self.screens_list().and_then(|k| {
+            k.on()
+                .find(|s| s.built_in)
+                .or_else(|| k.on().find(|s| s.primary))
+                .or_else(|| k.on().next())
+                .map(|s| s.key.clone())
+        });
+        match key {
+            Some(key) => self.mirror_to(Some(key)),
+            None => iced::Task::none(),
+        }
+    }
+
+    /// The screen of identity `shown` mirrored on the others, or none:
+    /// asked of the compositor, toasted with "Annuler".
+    fn mirror_to(&mut self, shown: Option<String>) -> iced::Task<Message> {
+        let before = self
+            .screens_list()
+            .and_then(Screens::shown)
+            .map(|s| s.key.clone());
+        if before == shown {
+            return iced::Task::none();
+        }
+        let done = self.mirror_said(shown.as_deref());
+        self.mirror_line(shown.as_deref());
+        self.undo.push(super::Undo::Mirror(MirrorChoice {
+            before,
+            after: shown,
+            done: done.clone(),
+        }));
+        self.redo.clear();
+        self.toast(done, ToastAction::Undo, super::TOAST)
+    }
+
+    /// `mirror IDENTITY`, or `extend`, to the compositor.
+    fn mirror_line(&self, shown: Option<&str>) {
+        let line = match shown {
+            Some(key) => format!("mirror {key}"),
+            None => "extend".to_owned(),
+        };
+        tracing::info!(line, "mirroring asked of the compositor");
+        self.screens_ask(line);
+    }
+
+    /// "Recopie : l’écran du portable sur l’écran externe 55 pouces",
+    /// "Recopie arrêtée".
+    fn mirror_said(&self, shown: Option<&str>) -> String {
+        let lang = self.lang;
+        let Some(key) = shown else {
+            return self.say(words::MIRRORING_STOPPED).to_owned();
+        };
+        let Some(known) = self.screens_list() else {
+            return self.say(words::MIRRORING_STOPPED).to_owned();
+        };
+        let lower = |s: &Screen| screens::lower_first(&s.title(lang));
+        let shown = known.on().find(|s| s.key == key);
+        let others: Vec<String> = known.on().filter(|s| s.key != key).map(lower).collect();
+        words::mirroring_the_on_the(
+            lang,
+            words::MirroringTheOnThe {
+                shown: &shown.map(lower).unwrap_or_default(),
+                mirror: &others.join(", "),
+            },
+        )
+    }
+
+    /// `choice` undone (or redone): the compositor asked its other side.
+    pub(in crate::app) fn mirror_undo(
+        &mut self,
+        choice: MirrorChoice,
+        redo: bool,
+    ) -> iced::Task<Message> {
+        let to = if redo {
+            choice.after.clone()
+        } else {
+            choice.before.clone()
+        };
+        self.mirror_line(to.as_deref());
+        let text = match redo {
+            false => words::undone(self.lang, &choice.done),
+            true => words::redone(self.lang, &choice.done),
+        };
+        if redo {
+            self.undo.push(super::Undo::Mirror(choice));
+        } else {
+            self.redo.push(super::Undo::Mirror(choice));
+        }
+        self.go(super::Page::Section(crate::model::SectionId::Screens));
+        self.light = Some((MIRROR, Instant::now()));
+        self.toast(text, ToastAction::None, super::UNDONE)
     }
 
     fn say_scale_choice(&self, scale: Option<f64>, screen: &Screen) -> String {
@@ -1122,6 +1305,12 @@ impl App {
             }
         }
         out.extend([USE, RESOLUTION, RATE, SCALE, VRR, PRIMARY].map(Control::Row));
+        if self.screens_list().is_some_and(|k| k.on().count() >= 2) {
+            out.push(Control::Row(MIRROR));
+            if self.mirrored() {
+                out.push(Control::Row(SHOW));
+            }
+        }
         out
     }
 
@@ -1205,7 +1394,7 @@ impl App {
             (Control::Set(name), Named::ArrowDown) if alt => {
                 self.screens_update(Msg::SetMenu(name.clone()))
             }
-            (Control::Row(row @ (USE | VRR)), Named::Enter | Named::Space) => {
+            (Control::Row(row @ (USE | VRR | MIRROR)), Named::Enter | Named::Space) => {
                 self.screens_update(Msg::Toggle(row))
             }
             (Control::Row(row), Named::Enter | Named::Space) => self.screens_update(Msg::Menu(row)),

@@ -24,6 +24,11 @@
 //! the waveform over the time in the mini form's column (36 × 44, as the
 //! recording's). It draws again as its time's second changes.
 //!
+//! Mirroring (#931) is a tile of its own, first: 44 × 40, radius 10,
+//! `rgba(108,194,135,0.16)` in a 1 px `rgba(108,194,135,0.6)` ring, a
+//! two-screens icon in `#6CC287` over "Recopie" (Manrope bold 9 px,
+//! `#BFF0CF`).
+//!
 //! It pops in over 200 ms as it appears (`ease-out`, from 0.9 of its size
 //! and transparent), a fade alone with reduced motion; then it draws only
 //! when what it shows changes: while a recording runs, as its time's second
@@ -55,6 +60,14 @@ use crate::{
 
 /// A kind's tile, and between two.
 pub const TILE: Size = Size::new(30.0, 24.0);
+/// Mirroring's tile (#931).
+pub const MIRROR_TILE: Size = Size::new(44.0, 40.0);
+const MIRROR_RADIUS: f32 = 10.0;
+const MIRROR_ICON: f32 = 18.0;
+const MIRROR_WORD: f32 = 9.0;
+const MIRROR_FILL: Ink = Ink::Dark(Color::from_rgba8(108, 194, 135, 0.16));
+const MIRROR_RING: Ink = Ink::Dark(Color::from_rgba8(108, 194, 135, 0.6));
+const MIRROR_INK: Ink = Ink::Dark(rgb(0xBFF0CF));
 /// The recording's tile: the mini sign's 48 less its 6 px sides; 6 px in
 /// above its 10 px dot, 4 px over its time's 16 px line, 6 px under it.
 pub const REC_TILE: Size = Size::new(36.0, REC_PAD + REC_DOT + REC_GAP + REC_LINE + REC_PAD);
@@ -128,7 +141,7 @@ pub fn colour(kind: Kind, muted: bool) -> Color {
     match kind {
         Kind::Microphone if muted => MUTED.get(),
         Kind::Microphone => MICROPHONE.get(),
-        Kind::Camera => CAMERA.get(),
+        Kind::Camera | Kind::Mirror => CAMERA.get(),
         Kind::Recording | Kind::Transcription => REC_RED.get(),
         Kind::Screen => SCREEN.get(),
     }
@@ -137,6 +150,7 @@ pub fn colour(kind: Kind, muted: bool) -> Color {
 /// Kind `kind`'s tile's size in `form`.
 fn tile(kind: Kind, form: Form) -> Size {
     match (kind, form) {
+        (Kind::Mirror, _) => MIRROR_TILE,
         (Kind::Recording, _) => REC_TILE,
         (Kind::Transcription, Form::Full) => TX_FULL,
         (Kind::Transcription, Form::Mini) => TX_MINI,
@@ -506,6 +520,7 @@ impl Items for Sign {
                     tx: tx.as_deref(),
                     effects,
                     voice,
+                    mirroring: self.words.kind(Kind::Mirror, false),
                 };
                 draw_sign(f, rect, form, &shown, lit, alpha * opacity);
             });
@@ -558,6 +573,8 @@ pub struct Shown<'a> {
     /// A voice of the Hocuspanda microphone is on: the same dot on the
     /// microphone's tile (lot 5).
     pub voice: bool,
+    /// Mirroring's word (#931).
+    pub mirroring: &'a str,
 }
 
 /// The sign at `rect` in `form`: its tint, then a tile per kind.
@@ -576,12 +593,17 @@ pub fn draw_sign(
         tx,
         effects,
         voice,
+        mirroring,
     } = *shown;
     f.fill(
         &kit::rounded(rect, RADIUS),
         faded(if lit { LIT.get() } else { FILL.get() }, alpha),
     );
     for (kind, tile) in kinds.iter().zip(tiles(rect, form, kinds)) {
+        if *kind == Kind::Mirror {
+            draw_mirror(f, tile, mirroring, alpha);
+            continue;
+        }
         if *kind == Kind::Recording {
             if let Some(rec) = rec {
                 draw_rec(f, tile, rec, alpha);
@@ -622,6 +644,45 @@ pub fn draw_sign(
             );
         }
     }
+}
+
+/// Mirroring's tile at `rect` (#931): its tint and ring, two screens over
+/// its word.
+pub fn draw_mirror(f: &mut Frame, rect: Rectangle, word: &str, alpha: f32) {
+    f.fill(
+        &kit::rounded(rect, MIRROR_RADIUS),
+        faded(MIRROR_FILL.get(), alpha),
+    );
+    f.stroke(
+        &kit::rounded(
+            Rectangle::new(
+                Point::new(rect.x + 0.5, rect.y + 0.5),
+                Size::new(rect.width - 1.0, rect.height - 1.0),
+            ),
+            MIRROR_RADIUS - 0.5,
+        ),
+        Stroke::default()
+            .with_color(faded(MIRROR_RING.get(), alpha))
+            .with_width(1.0),
+    );
+    let icon = Rectangle::new(
+        Point::new(rect.center_x() - MIRROR_ICON / 2.0, rect.y + 5.0),
+        Size::new(MIRROR_ICON, MIRROR_ICON),
+    );
+    draw_icon(f, Kind::Mirror, icon, faded(CAMERA.get(), alpha));
+    f.fill_text(kit::text_in(
+        crate::levels::draw::MANROPE_BOLD,
+        kit::text(
+            word.to_owned(),
+            Point::new(
+                rect.center_x(),
+                rect.y + rect.height - 5.0 - MIRROR_WORD * 0.7,
+            ),
+            MIRROR_WORD,
+            faded(MIRROR_INK.get(), alpha),
+            Alignment::Center,
+        ),
+    ));
 }
 
 /// The recording's tile at `rect` (5.10's item): its tint and ring, its dot
@@ -759,6 +820,20 @@ pub fn draw_icon(f: &mut Frame, kind: Kind, rect: Rectangle, colour: Color) {
         }
         // Their tiles draw their own: the dot, the waveform.
         Kind::Recording | Kind::Transcription => {}
+        // Two screens, the second behind the first, up and right (#931).
+        Kind::Mirror => {
+            b.rounded_rectangle(p(2.5, 7.5), Size::new(13.0 * k, 9.0 * k), (1.5 * k).into());
+            b.move_to(p(7.5, 4.5));
+            b.line_to(p(20.0, 4.5));
+            b.quadratic_curve_to(p(21.5, 4.5), p(21.5, 6.0));
+            b.line_to(p(21.5, 12.0));
+            b.quadratic_curve_to(p(21.5, 13.5), p(20.0, 13.5));
+            b.line_to(p(18.0, 13.5));
+            b.move_to(p(6.5, 20.0));
+            b.line_to(p(11.5, 20.0));
+            b.move_to(p(9.0, 16.5));
+            b.line_to(p(9.0, 20.0));
+        }
         Kind::Screen => {
             b.move_to(p(3.5, 5.0));
             b.line_to(p(20.5, 5.0));

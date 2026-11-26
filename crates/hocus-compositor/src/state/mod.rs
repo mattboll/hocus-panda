@@ -186,6 +186,8 @@ pub struct State {
     pub(crate) displays: crate::displays::Displays,
     /// The screens' identities and their sets (windows.md §12).
     pub(crate) screen_sets: crate::screen_sets::Sets,
+    /// Mirroring: one screen's picture on the others (#931).
+    pub(crate) mirror: crate::mirror::Mirror,
     /// The mice and touchpads, and what they were given (6.12).
     pub input_devices: crate::input_devices::InputDevices,
     /// The control socket's subscribers to the desktop's events
@@ -375,6 +377,7 @@ impl State {
             mcp: crate::mcp::Mcp::default(),
             displays: crate::displays::Displays::default(),
             screen_sets,
+            mirror: crate::mirror::Mirror::default(),
             input_devices: crate::input_devices::InputDevices::default(),
             events: crate::events::Events::default(),
             idle,

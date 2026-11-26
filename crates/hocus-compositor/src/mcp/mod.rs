@@ -876,8 +876,9 @@ impl State {
             .collect()
     }
 
-    fn mcp_outputs(&self) -> Vec<Value> {
-        self.space
+    pub(crate) fn mcp_outputs(&self) -> Vec<Value> {
+        let mut outputs: Vec<Value> = self
+            .space
             .outputs()
             .map(|output| {
                 json!({
@@ -887,7 +888,15 @@ impl State {
                     "scale": output.current_scale().fractional_scale(),
                 })
             })
-            .collect()
+            .collect();
+        // A mirror (#931): no place nor size of its own, the screen whose
+        // picture it shows.
+        for output in &self.displays.outputs {
+            if let Some(shown) = self.mirror_source(output) {
+                outputs.push(json!({ "name": output.name(), "mirror_of": shown.name() }));
+            }
+        }
+        outputs
     }
 
     /// Whether an action can be done as asked: the window there, the
@@ -997,12 +1006,21 @@ impl State {
     /// The screen `name` names, else the focused window's, else the first.
     fn mcp_output(&self, name: Option<&str>) -> Result<Output, String> {
         match name {
-            Some(name) => self
-                .space
-                .outputs()
-                .find(|o| o.name() == name)
-                .cloned()
-                .ok_or_else(|| format!("no screen {name:?}: list_outputs says which there are")),
+            Some(name) => {
+                if let Some(mirror) = self.mirror_named(name)
+                    && let Some(shown) = self.mirror_source(mirror)
+                {
+                    return Err(format!(
+                        "screen {name:?} shows another screen's picture ({}): use that one",
+                        shown.name()
+                    ));
+                }
+                self.space
+                    .outputs()
+                    .find(|o| o.name() == name)
+                    .cloned()
+                    .ok_or_else(|| format!("no screen {name:?}: list_outputs says which there are"))
+            }
             None => self
                 .model
                 .focused()

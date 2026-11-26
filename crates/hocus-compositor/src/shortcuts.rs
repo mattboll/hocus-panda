@@ -100,6 +100,9 @@ pub enum Action {
     /// Every MCP agent stopped, or let go on (docs/design/mcp.md): even
     /// while a window holds the shortcuts back.
     StopAgents,
+    /// The screens mirrored, or extended again (#931,
+    /// `crate::mirror`): at once, nothing opening.
+    Mirror,
 }
 
 impl Action {
@@ -441,6 +444,8 @@ shortcuts! {
     magnifier_off: ["Super+Escape"] => Action::MagnifierOff,
     screen_reader: ["Super+Alt+S"] => Action::ScreenReader,
     stop_agents: ["Super+Shift+Escape"] => Action::StopAgents,
+    // Last: a file that gives either key to another action keeps it.
+    mirror: ["Super+Shift+P", "XF86Display"] => Action::Mirror,
 }
 
 impl Shortcuts {
@@ -633,6 +638,7 @@ impl State {
             Action::ScreenReader => self.toggle_screen_reader(),
             Action::Actions => self.toggle_actions(),
             Action::StopAgents => self.mcp_toggle_stop(),
+            Action::Mirror => self.mirror_toggle(),
         }
     }
 

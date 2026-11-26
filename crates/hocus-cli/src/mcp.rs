@@ -479,7 +479,9 @@ fn tools() -> Vec<Value> {
             "name": "list_outputs",
             "title": "List screens",
             "description": "The screens: name, geometry in the global logical space, the work area \
-                windows go in (without the bar), scale.",
+                windows go in (without the bar), scale. A screen mirroring another shows that \
+                screen's picture and has no place of its own: it is listed with `mirror_of`, the \
+                screen it shows, and no geometry.",
             "inputSchema": none,
             "annotations": read,
         }),

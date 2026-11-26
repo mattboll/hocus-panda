@@ -51,6 +51,8 @@ pub struct Commits {
     /// A client committed, whether a screen shows it or not: what a
     /// share or a recording of a window looks at.
     any: bool,
+    /// Mirroring (#931): each mirror draws when the screen it shows does.
+    follows: Vec<(Output, Output)>,
 }
 
 /// What the commits asked of the screens since they last drew.
@@ -95,13 +97,25 @@ impl Commits {
         !self.screens.is_empty()
     }
 
-    /// The screens asked for, forgotten with the commits.
+    /// The screens asked for, forgotten with the commits: a mirror with
+    /// the screen it shows.
     pub fn take(&mut self) -> Asked {
         self.any = false;
+        let mut scenes = std::mem::take(&mut self.screens);
+        for (shown, mirror) in &self.follows {
+            if scenes.contains(shown) && !scenes.contains(mirror) {
+                scenes.push(mirror.clone());
+            }
+        }
         Asked {
-            scenes: std::mem::take(&mut self.screens),
+            scenes,
             owed: std::mem::take(&mut self.owed),
         }
+    }
+
+    /// The mirrors and the screens they show, `(shown, mirror)` (#931).
+    pub fn set_follows(&mut self, follows: Vec<(Output, Output)>) {
+        self.follows = follows;
     }
 
     fn on(&mut self, output: Output) {

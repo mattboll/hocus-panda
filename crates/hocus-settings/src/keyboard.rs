@@ -1,7 +1,7 @@
 //! Clavier et raccourcis / Keyboard and shortcuts (6.8, variant A): the
 //! layouts, the keys' repeat and the special keys on the section's page;
 //! every desktop shortcut (`[shortcuts]`, the compositor's
-//! `shortcuts.rs`: 73 actions) on a sub-page of its own, with its search.
+//! `shortcuts.rs`: 75 actions) on a sub-page of its own, with its search.
 //! Each is an action of the palette's catalogue too
 //! (`hocus_link::actions`, #736): its tests check so.
 //!
@@ -67,10 +67,17 @@ pub const SCREEN_READER: RowGroup = RowGroup {
     per_source: false,
 };
 
-pub const SHORTCUT_GROUPS: [RowGroup; 8] = [
+/// The screens' shortcut: mirroring (#931).
+pub const SCREENS: RowGroup = RowGroup {
+    label: words::SCREENS,
+    per_source: false,
+};
+
+pub const SHORTCUT_GROUPS: [RowGroup; 9] = [
     WINDOWS,
     DESKTOPS,
     BAR,
+    SCREENS,
     CAPTURES,
     SESSION,
     MEDIA,
@@ -396,6 +403,34 @@ fn actions() -> Vec<Action> {
             words::JOIN_THE_MEETING,
             (&["visio", "appel"], &["call", "video"]),
         ),
+        // Mirroring (#931).
+        a(
+            "mirror",
+            SCREENS,
+            words::MIRROR_THE_SCREENS,
+            (
+                &[
+                    "recopier",
+                    "recopie",
+                    "miroir",
+                    "dupliquer",
+                    "cloner",
+                    "étendre",
+                    "projecteur",
+                    "télé",
+                    "présentation",
+                ],
+                &[
+                    "mirror",
+                    "duplicate",
+                    "clone",
+                    "extend",
+                    "projector",
+                    "tv",
+                    "presentation",
+                ],
+            ),
+        ),
         a(
             "capture",
             CAPTURES,
@@ -705,7 +740,7 @@ mod tests {
     #[test]
     fn every_action_of_the_compositor_is_here() {
         let all: Vec<&Setting> = shortcuts().collect();
-        assert_eq!(all.len(), 74);
+        assert_eq!(all.len(), 75);
         for group in SHORTCUT_GROUPS {
             assert!(all.iter().any(|s| s.group == group));
         }
@@ -718,6 +753,7 @@ mod tests {
         assert_eq!(count(MEDIA), 5);
         assert_eq!(count(MAGNIFIER), 3);
         assert_eq!(count(SCREEN_READER), 1);
+        assert_eq!(count(SCREENS), 1);
         // The shipped file's keys, every one.
         let shipped = include_str!("../../../packaging/config.toml");
         for setting in &all {

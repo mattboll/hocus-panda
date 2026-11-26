@@ -461,6 +461,23 @@ fn to_shell() -> Vec<ToShell> {
             desktop: 0,
             apps: vec![],
         }),
+        ToShell::ScreensNew(ScreensNew {
+            built_in: false,
+            inches: 55,
+        }),
+        ToShell::Mirror(Some(MirrorShown {
+            shown: MirrorScreen {
+                output: "eDP-1".into(),
+                built_in: true,
+                inches: 14,
+            },
+            mirrors: vec![MirrorScreen {
+                output: "HDMI-A-1".into(),
+                built_in: false,
+                inches: 55,
+            }],
+        })),
+        ToShell::Mirror(None),
         ToShell::AgentPandas(true),
         ToShell::AgentPandas(false),
         ToShell::SoundBoost(true),
@@ -975,6 +992,8 @@ fn to_compositor() -> Vec<ToCompositor> {
         ToCompositor::A11yEnd,
         ToCompositor::GoToAgent { id: 7, row: None },
         ToCompositor::PeekClose,
+        ToCompositor::Mirror(true),
+        ToCompositor::Mirror(false),
         ToCompositor::Ring(Row {
             output: "eDP-1".into(),
             x: -190,

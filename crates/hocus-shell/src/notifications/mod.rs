@@ -192,6 +192,12 @@ pub fn sharing(on: bool) {
     input(Input::Sharing(on));
 }
 
+/// The hold under way is while the screens are mirrored (#931): it is
+/// summed up as such.
+pub fn mirrored() {
+    input(Input::Mirrored);
+}
+
 /// The session locked, or unlocked (7.1): new bubbles wait meanwhile.
 pub fn locked(on: bool) {
     input(Input::Locked(on));

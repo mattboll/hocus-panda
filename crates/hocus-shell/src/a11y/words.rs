@@ -326,6 +326,9 @@ impl Words {
                     Kind::Transcription => hocus_words::shell::transcribe::TRANSCRIPTION
                         .get(self.lang)
                         .to_owned(),
+                    Kind::Mirror => hocus_words::shell::in_use::MIRRORING
+                        .get(self.lang)
+                        .to_owned(),
                 }
             })
             .collect();

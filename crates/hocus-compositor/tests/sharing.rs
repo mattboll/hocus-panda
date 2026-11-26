@@ -1367,3 +1367,126 @@ fn the_presenter_stands_in_the_shared_stream_never_on_the_screen() -> anyhow::Re
     }
     Ok(())
 }
+
+/// Mirroring (#931): the bed's screen (a TV, 1920 × 1080) shared, then
+/// the laptop's panel plugged beside it.
+fn plug_laptop(bed: &mut Bed) -> anyhow::Result<()> {
+    bed.hp.plug_screen(
+        "HEADLESS-2",
+        hocus_compositor::OutputSpec::new(2560, 1600)
+            .physical_size(302, 189)
+            .scale(1.25),
+        None,
+    )?;
+    bed.idle(Duration::from_millis(100))?;
+    bed.hp.set_internal("HEADLESS-2");
+    Ok(())
+}
+
+/// Mirroring's acceptance 22: a share of the screen that becomes a mirror
+/// ends as mirroring starts, as for a screen unplugged.
+#[test]
+fn a_share_of_the_mirror_ends_as_mirroring_starts() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell)?;
+    let (session, _) = bed.share_screen()?;
+    assert_eq!(bed.shares().len(), 1);
+    plug_laptop(&mut bed)?;
+    assert_eq!(bed.shares().len(), 1, "extended, the share goes on");
+    bed.hp.mirror(true);
+    assert_eq!(
+        bed.hp.mirroring(),
+        Some(("HEADLESS-2".to_owned(), vec!["HEADLESS-1".to_owned()]))
+    );
+    bed.closed(&session)?;
+    assert!(bed.shares().is_empty());
+    Ok(())
+}
+
+/// Mirroring's acceptance 21: mirrored, the chooser lists the screen
+/// shown alone, and sharing it shares its picture.
+#[test]
+fn mirrored_the_chooser_lists_the_screen_shown_alone() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell)?;
+    plug_laptop(&mut bed)?;
+    bed.hp.mirror(true);
+    bed.idle(Duration::from_millis(100))?;
+    let (_, started) = bed.share_screen()?;
+    let log = bed.log();
+    let chooser = log
+        .lines()
+        .rev()
+        .find(|l| l.contains("the share's chooser shows it"))
+        .unwrap_or_default();
+    // The laptop's screen alone, not the TV mirroring it.
+    assert!(chooser.contains("2560 × 1600"), "{chooser}");
+    assert!(!chooser.contains("1920 × 1080"), "{chooser}");
+    let [(_, _, size, _)] = started.streams.as_slice() else {
+        anyhow::bail!("{started:?}");
+    };
+    assert_eq!(*size, Some((2048, 1280)));
+    assert_eq!(
+        bed.shares()[0].source,
+        ShareSource::Screen("HEADLESS-2".into())
+    );
+    Ok(())
+}
+
+/// Mirroring's acceptance 24: mirrored, two notifications are held and a
+/// critical one shows; extended again, one bubble sums them up "while
+/// mirroring".
+#[test]
+fn notifications_are_held_while_mirrored() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell)?;
+    bed.logged("the notifications are served")?;
+    plug_laptop(&mut bed)?;
+    bed.hp.mirror(true);
+    bed.logged("the screen is shared: bubbles are held")?;
+    for (app, urgency) in [("Slack", 1u8), ("Signal", 1), ("Batterie", 2)] {
+        let client = bed.client.clone();
+        bed.runtime.block_on(async move {
+            let mut hints = HashMap::<&str, OwnedVariant>::new();
+            hints.insert("urgency", OwnedVariant::from(urgency));
+            client
+                .call_method(
+                    Some("org.freedesktop.Notifications"),
+                    "/org/freedesktop/Notifications",
+                    Some("org.freedesktop.Notifications"),
+                    "Notify",
+                    &(
+                        app,
+                        0u32,
+                        "",
+                        "Un titre",
+                        "Un message",
+                        Vec::<String>::new(),
+                        hints,
+                        -1i32,
+                    ),
+                )
+                .await
+        })?;
+    }
+    let one = bed.hp.dispatch_until(Duration::from_secs(10), |hp| {
+        hp.bubble_surfaces().len() == 1
+    })?;
+    anyhow::ensure!(one, "the critical one never showed:\n{}", bed.log());
+    bed.idle(Duration::from_millis(500))?;
+    assert_eq!(bed.hp.bubble_surfaces().len(), 1, "the critical one alone");
+    bed.hp.mirror(false);
+    bed.logged("the summary of what was held")?;
+    let log = bed.log();
+    assert!(
+        log.contains("title=\"2 notifications pendant la recopie\""),
+        "{log}"
+    );
+    Ok(())
+}

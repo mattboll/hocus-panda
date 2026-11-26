@@ -678,6 +678,11 @@ pub const ALL: &[Label] = &[
         said: Said::Other,
     },
     Label {
+        key: "shortcuts.mirror",
+        name: hocus_words::settings::keyboard::MIRROR_THE_SCREENS,
+        said: Said::Other,
+    },
+    Label {
         key: "shortcuts.move-to-screen-left",
         name: hocus_words::settings::keyboard::MOVE_TO_THE_SCREEN_ON_THE,
         said: Said::Other,

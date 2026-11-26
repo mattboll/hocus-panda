@@ -15,10 +15,11 @@
 //!   mode, scale and VRR, and which is primary, over `[outputs.NAME]`
 //!   and `[panel] output`, which stay the defaults any set starts from.
 //!   The Settings write it (6.9); the compositor only reads it.
-//! - **The sets seen** (when each was last in use, its screens' sizes)
-//!   are kept in `$XDG_STATE_HOME/hocuspanda/screen-sets`, written on a
-//!   thread, for the Settings' list; "Oublier cet ensemble" forgets one
-//!   there as the Settings take its table out of the file.
+//! - **The sets seen** (when each was last in use, its screens' sizes,
+//!   and the screen it mirrors, #931, `crate::mirror`) are kept in
+//!   `$XDG_STATE_HOME/hocuspanda/screen-sets`, written on a thread, for
+//!   the Settings' list; "Oublier cet ensemble" forgets one there as the
+//!   Settings take its table out of the file (and its mirroring with it).
 
 use std::{
     collections::BTreeMap,
@@ -103,6 +104,10 @@ pub struct SeenScreen {
 pub struct Seen {
     pub screens: Vec<SeenScreen>,
     pub seen: i64,
+    /// Mirrored: the identity of the screen shown on the others (#931);
+    /// none, extended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -311,10 +316,55 @@ impl State {
         if changed {
             tracing::info!(set = keys.join(" + "), "the set of screens");
         }
+        let mirror = was.and_then(|w| w.mirror);
+        self.screen_sets.seen.insert(
+            name.clone(),
+            Seen {
+                screens,
+                seen: now,
+                mirror,
+            },
+        );
+        self.screen_sets.current = Some(name);
+        self.remember_screen_sets();
+    }
+
+    /// Whether the set of `keys` was seen before.
+    pub(crate) fn set_seen(&self, keys: &[String]) -> bool {
+        self.screen_sets.seen.contains_key(&set_name(keys))
+    }
+
+    /// The screen the set of `keys` is mirrored on, if it keeps one (#931).
+    pub(crate) fn kept_mirror(&self, keys: &[String]) -> Option<String> {
         self.screen_sets
             .seen
-            .insert(name.clone(), Seen { screens, seen: now });
-        self.screen_sets.current = Some(name);
+            .get(&set_name(keys))
+            .and_then(|s| s.mirror.clone())
+    }
+
+    /// The set in use keeps `mirror` (#931): the screen shown, or none,
+    /// extended. Noted as a set seen if it was not yet, and written.
+    pub(crate) fn keep_mirror(&mut self, mirror: Option<String>) {
+        let keys = self.current_set();
+        if keys.is_empty() {
+            return;
+        }
+        let name = set_name(&keys);
+        if !self.screen_sets.seen.contains_key(&name) {
+            self.note_screen_set();
+        }
+        let Some(seen) = self.screen_sets.seen.get_mut(&name) else {
+            return;
+        };
+        if seen.mirror == mirror {
+            return;
+        }
+        tracing::info!(
+            set = keys.join(" + "),
+            mirror = mirror.as_deref().unwrap_or("-"),
+            "the set of screens keeps its mirroring"
+        );
+        seen.mirror = mirror;
         self.remember_screen_sets();
     }
 
@@ -399,9 +449,9 @@ impl State {
         };
         let text = match toml::to_string(&remembered) {
             Ok(text) => format!(
-                "# The sets of screens seen and when each was last in use, for the\n\
-                 # Settings' list. Written by Hocuspanda; their arrangements are\n\
-                 # [[screen-sets]] in config.toml.\n{text}"
+                "# The sets of screens seen, when each was last in use and the screen\n\
+                 # it mirrors, for the Settings' list. Written by Hocuspanda; their\n\
+                 # arrangements are [[screen-sets]] in config.toml.\n{text}"
             ),
             Err(err) => {
                 tracing::warn!(%err, "could not write the screen sets");

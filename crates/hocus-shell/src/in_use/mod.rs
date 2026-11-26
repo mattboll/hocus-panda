@@ -25,6 +25,12 @@
 //! a camera for a moment to list or probe it, which lights nothing. The
 //! same thread wakes when a use settles.
 //!
+//! - **Mirroring** (#931): what the compositor says it mirrors
+//!   (`mirror`), a green tile of its own first, "Recopie" under a
+//!   two-screens icon; its popover's line says which screen shows on
+//!   which, and its button stops it. It shows while mirroring, no
+//!   longer: the user stopped it, or the compositor did.
+//!
 //! The sign shows under the clock while something is in use, in both
 //! forms: a surface of its own on each bar, opened when the first use
 //! starts and removed when the last one has lingered; the column under it
@@ -62,6 +68,8 @@ pub const SETTLED: Duration = Duration::from_secs(3);
 /// What the sign shows a tile for, in its order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Kind {
+    /// The screens mirrored (#931): first, above the others.
+    Mirror,
     Microphone,
     Camera,
     /// A meeting's transcription, its red tile with its time
@@ -163,6 +171,8 @@ pub struct Uses {
     pub shares: Vec<Seen<ShareShown>>,
     pub recording: Option<Seen<Rec>>,
     pub transcription: Option<Seen<Tx>>,
+    /// The screens mirrored, as the compositor says (#931).
+    pub mirror: Option<hocus_link::MirrorShown>,
     /// The default source is muted: the microphone's tile is grey.
     pub muted: bool,
     /// When the sign last appeared: it pops in from then.
@@ -173,6 +183,9 @@ impl Uses {
     /// The kinds shown, in the sign's order.
     pub fn kinds(&self) -> Vec<Kind> {
         let mut kinds = Vec::new();
+        if self.mirror.is_some() {
+            kinds.push(Kind::Mirror);
+        }
         if !self.microphone.is_empty() {
             kinds.push(Kind::Microphone);
         }
@@ -228,7 +241,16 @@ impl Uses {
         if self.recording.as_ref().is_some_and(|r| r.live()) {
             used.push((Kind::Recording, Vec::new()));
         }
+        if self.mirror.is_some() {
+            used.push((Kind::Mirror, Vec::new()));
+        }
         used
+    }
+
+    /// Whether notifications are held: while sharing, and while mirrored
+    /// (#931, what the laptop shows, the room sees).
+    pub fn holds(&self) -> bool {
+        self.live_shares().count() > 0 || self.mirror.is_some()
     }
 
     /// The shares still on (not lingering).
@@ -419,9 +441,12 @@ fn update(now: Instant, change: impl FnOnce(&mut State)) {
     } else if was != is || before.muted != after.muted {
         tracing::debug!(kinds = ?is, muted = after.muted, "the in-use sign shows");
     }
-    let live = |u: &Uses| u.live_shares().count() > 0;
-    if live(&before) != live(&after) {
-        crate::notifications::sharing(live(&after));
+    if before.holds() != after.holds() {
+        crate::notifications::sharing(after.holds());
+    }
+    // A hold under way says, at its end, that it was while mirroring.
+    if after.mirror.is_some() && before.mirror.is_none() {
+        crate::notifications::mirrored();
     }
     let mut effects = Vec::new();
     if was.is_empty() != is.is_empty() {
@@ -555,6 +580,16 @@ pub fn set_shares(shares: Vec<ShareShown>) {
         "what is shared"
     );
     update(now, |s| follow(&mut s.uses.shares, shares, |s| s.id, now));
+}
+
+/// The compositor's `mirror` (#931): the screens mirrored, or no longer.
+pub fn set_mirror(shown: Option<hocus_link::MirrorShown>) {
+    tracing::debug!(
+        shown = shown.as_ref().map(|m| m.shown.output.as_str()),
+        mirrors = ?shown.as_ref().map(|m| m.mirrors.iter().map(|o| o.output.clone()).collect::<Vec<_>>()),
+        "the screens mirrored"
+    );
+    update(Instant::now(), |s| s.uses.mirror = shown);
 }
 
 /// The thread that wakes when a use has lingered enough, or a camera's use
@@ -774,6 +809,7 @@ impl Words {
             Kind::Microphone => self.pick(txt::MICROPHONE),
             Kind::Camera => self.pick(txt::CAMERA),
             Kind::Recording | Kind::Screen => self.pick(txt::SCREEN),
+            Kind::Mirror => self.pick(txt::MIRRORING),
             Kind::Transcription => hocus_words::shell::transcribe::TRANSCRIPTION.get(self.lang),
         }
     }
@@ -877,6 +913,40 @@ impl Words {
 
     pub fn stop_recording(self) -> &'static str {
         self.pick(txt::STOP_RECORDING)
+    }
+
+    /// The mirroring's button (#931).
+    pub fn stop_mirroring(self) -> &'static str {
+        self.pick(txt::STOP_MIRRORING)
+    }
+
+    /// How many notifications are held while mirrored, none when none
+    /// (#931).
+    pub fn held_mirroring(self, n: usize) -> Option<String> {
+        match n {
+            0 => None,
+            1 => Some(txt::N_1_NOTIFICATION_HELD_2.get(self.lang).to_owned()),
+            n => Some(txt::notifications_held_2(self.lang, n)),
+        }
+    }
+
+    /// The mirroring's line: "Écran du portable → écran externe 55
+    /// pouces".
+    pub fn mirroring_line(self, shown: &hocus_link::MirrorShown) -> String {
+        use hocus_words::shell::agents_peek as peek;
+        let name = |s: &hocus_link::MirrorScreen| match (s.built_in, s.inches) {
+            (true, _) => peek::LAPTOP_SCREEN.get(self.lang).to_owned(),
+            (false, 0) => peek::EXTERNAL_SCREEN.get(self.lang).to_owned(),
+            (false, i) => peek::inch_screen(self.lang, i),
+        };
+        let first = name(&shown.shown);
+        let mut letters = first.chars();
+        let first: String = letters
+            .next()
+            .map(|c| c.to_uppercase().chain(letters).collect())
+            .unwrap_or_default();
+        let others: Vec<String> = shown.mirrors.iter().map(name).collect();
+        format!("{first} → {}", others.join(", "))
     }
 }
 

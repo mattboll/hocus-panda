@@ -374,8 +374,8 @@ fn the_shortcuts_are_on_a_sub_page_with_their_own_search() -> anyhow::Result<()>
         ]
     );
     let shown = bed.shortcuts()?;
-    // 74 actions: three families of nine folded, 47 others.
-    assert_eq!(shortcut_ids(&shown).len(), 50, "{:?}", shortcut_ids(&shown));
+    // 75 actions: three families of nine folded, 48 others.
+    assert_eq!(shortcut_ids(&shown).len(), 51, "{:?}", shortcut_ids(&shown));
     // Its own search: Print's.
     bed.click("shortcuts:search")?;
     bed.type_text("impr")?;
@@ -859,5 +859,33 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.record("shortcuts.desktop-left", 0)?;
     settle(&mut bed)?;
     shoot(&mut bed, "shortcuts-recording.png")?;
+    Ok(())
+}
+
+/// Acceptance 20 of mirroring (#931): "Recopier les écrans" shows
+/// `Super + Maj + P` and `Touche écran`; `Super + Maj + P` taken off (its
+/// keycaps clicked, then Backspace) leaves the display key alone.
+#[test]
+fn mirroring_s_row_shows_its_two_keys() -> anyhow::Result<()> {
+    const KEY_BACKSPACE: u32 = 14;
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shortcuts()?;
+    let row = shortcut(&shown, "shortcuts.mirror");
+    assert_eq!(
+        row["keys"],
+        serde_json::json!(["Super + Maj + P", "Touche écran"])
+    );
+    bed.reveal("chord:shortcuts.mirror:0")?;
+    bed.record("shortcuts.mirror", 0)?;
+    bed.hp.key(KEY_BACKSPACE, true);
+    bed.hp.key(KEY_BACKSPACE, false);
+    let text = bed.written(|t| t.contains("mirror = "))?;
+    assert!(
+        text.contains("mirror = \"XF86Display\"") || text.contains("mirror = [\"XF86Display\"]"),
+        "{text}"
+    );
     Ok(())
 }

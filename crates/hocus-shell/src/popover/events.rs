@@ -148,6 +148,10 @@ pub enum Effect {
     },
     /// The winking panda clicked: the compositor sends it back.
     PeekClose,
+    /// The screens mirrored (`true`: the new screens' bubble's
+    /// « Recopier »), or extended again (the « Recopie » sign's « Arrêter
+    /// la recopie »), #931.
+    Mirror(bool),
     /// The compositor plugs a tool in, or unplugs it (4.0).
     Plug(crate::agents::Tool),
     Unplug(crate::agents::Tool),

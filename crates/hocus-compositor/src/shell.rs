@@ -861,6 +861,9 @@ impl State {
         self.tell_fullscreen_again();
         self.hand_kept_levels();
         self.tell_sharing_again();
+        if self.mirroring() {
+            self.tell_shell(ToShell::Mirror(self.mirror_said()));
+        }
         self.auth_tell_caps();
         if self.record.recording() {
             self.tell_recording();
@@ -1009,6 +1012,7 @@ impl State {
             }
             ToCompositor::Briefing { open } => self.peek_briefing(open),
             ToCompositor::PeekClose => self.peek_closed(),
+            ToCompositor::Mirror(on) => self.mirror_asked(on),
             ToCompositor::Meeting(near) => {
                 tracing::debug!(?near, "the next meeting, for the halo");
                 self.meeting_near(near.map(|near| match near {

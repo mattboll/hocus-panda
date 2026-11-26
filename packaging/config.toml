@@ -352,6 +352,8 @@
 # go on again (docs/design/mcp.md); it works whatever holds the keys
 # back, and an agent's keys never press it.
 # stop-agents = "Super+Shift+Escape"
+# Mirror the screens, or extend them again.
+# mirror = ["Super+Shift+P", "XF86Display"]
 #
 # Fixed for now: Super and a drag moves a window, Super and a right-drag
 # resizes it; Super+Alt and the wheel over a window make it more or less

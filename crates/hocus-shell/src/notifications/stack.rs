@@ -110,6 +110,9 @@ pub enum Input {
     Dnd(Dnd),
     /// The screen is shared (5.11), or no longer is.
     Sharing(bool),
+    /// The hold under way is the screens' mirroring's too (#931): its
+    /// summary says so.
+    Mirrored,
     /// The session is locked (7.1), or no longer is: new bubbles wait for
     /// the unlock.
     Locked(bool),
@@ -342,6 +345,8 @@ pub struct Stack {
     /// While the screen is shared (5.11): the applications of the
     /// notifications held meanwhile, one each, in their order.
     sharing: Option<Vec<String>>,
+    /// The hold under way was while the screens were mirrored (#931).
+    mirrored: bool,
     /// The session is locked (7.1): bubbles wait in the queue.
     locked: bool,
     /// What was kept before is read back: until then, nothing is written
@@ -394,6 +399,7 @@ impl Stack {
             history: History::default(),
             dnd: Dnd::Off,
             sharing: None,
+            mirrored: false,
             locked: false,
             restored: false,
             hovered: BTreeSet::new(),
@@ -704,12 +710,18 @@ impl Stack {
                     self.relayout(effects);
                 }
             }
+            Input::Mirrored => {
+                if self.sharing.is_some() {
+                    self.mirrored = true;
+                }
+            }
             Input::Sharing(false) => {
                 let Some(held) = self.sharing.take() else {
                     return;
                 };
-                tracing::debug!(held = held.len(), "sharing ended");
-                if let Some(note) = summary(&held, super::wall_ms()) {
+                let mirrored = std::mem::take(&mut self.mirrored);
+                tracing::debug!(held = held.len(), mirrored, "sharing ended");
+                if let Some(note) = summary(&held, mirrored, super::wall_ms()) {
                     tracing::debug!(
                         title = note.summary,
                         body = note.body,
@@ -1361,12 +1373,22 @@ impl Stack {
 /// The bubble that sums up the notifications of applications `held`
 /// (one each, in their order) while the screen was shared: none when
 /// nothing was held.
-pub fn summary(held: &[String], at: i64) -> Option<Note> {
+pub fn summary(held: &[String], mirrored: bool, at: i64) -> Option<Note> {
     if held.is_empty() {
         return None;
     }
-    let fr = crate::clock::time::Lang::of_messages() == crate::clock::time::Lang::French;
-    let (summary, body) = summary_words(held, fr);
+    let lang = crate::clock::time::Lang::of_messages();
+    let fr = lang == crate::clock::time::Lang::French;
+    let (mut summary, body) = summary_words(held, fr);
+    // While the screens were mirrored (#931): "3 notifications pendant la
+    // recopie".
+    if mirrored {
+        use hocus_words::shell::in_use as txt;
+        summary = match held.len() {
+            1 => txt::N_1_NOTIFICATION_WHILE_MIRRORING.get(lang).to_owned(),
+            n => txt::notifications_while_mirroring(lang, n),
+        };
+    }
     Some(Note {
         id: SUMMARY,
         app: "Hocuspanda".to_owned(),

@@ -107,6 +107,8 @@ mod magnifier;
 mod mcp;
 mod meeting;
 mod memory;
+mod mirror;
+mod mirror_bar;
 mod moving_wallpaper;
 mod music;
 mod night_light;

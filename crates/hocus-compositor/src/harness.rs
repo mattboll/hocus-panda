@@ -3156,6 +3156,50 @@ impl Headless {
         self.app.state.peek.screens_out()
     }
 
+    /// Whether the winking panda offering to mirror a set of screens
+    /// never seen is out (#931).
+    pub fn screens_new_out(&self) -> bool {
+        self.app.state.peek.screens_new_out()
+    }
+
+    /// Mirroring asked for (`on`), or the screens extended again, as the
+    /// new screens' bubble's « Recopier » and the sign's « Arrêter la
+    /// recopie » ask it (#931).
+    pub fn mirror(&mut self, on: bool) {
+        self.app.state.mirror_asked(on);
+    }
+
+    /// The Settings' `mirror IDENTITY` (`Some`) or `extend` (#931).
+    pub fn mirror_from_settings(&mut self, shown: Option<&str>) -> Result<(), String> {
+        self.app.state.mirror_from_settings(shown)
+    }
+
+    /// Mirroring now: the screen shown and the mirrors, by name.
+    pub fn mirroring(&self) -> Option<(String, Vec<String>)> {
+        let state = &self.app.state;
+        let shown = state.mirror_shown()?.name();
+        let mirrors = state
+            .displays
+            .outputs
+            .iter()
+            .filter(|o| state.is_mirror(o))
+            .map(Output::name)
+            .collect();
+        Some((shown, mirrors))
+    }
+
+    /// Where mirror `name` draws the screen it shows: that screen, and the
+    /// picture's place on the mirror (pixels).
+    pub fn mirror_fitted(&self, name: &str) -> Option<(String, Rect)> {
+        let (shown, at) = self.app.state.mirror_fitted(name)?;
+        Some((shown, Rect::new(at.loc.x, at.loc.y, at.size.w, at.size.h)))
+    }
+
+    /// The screens as an MCP agent's `list_outputs` lists them.
+    pub fn mcp_outputs(&self) -> Vec<serde_json::Value> {
+        self.app.state.mcp_outputs()
+    }
+
     /// Whether the panda out goes back.
     pub fn peek_going_back(&self) -> bool {
         self.app.state.peek.going_back()

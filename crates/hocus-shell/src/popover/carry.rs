@@ -161,6 +161,10 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
             tell(ToCompositor::PeekClose);
             Vec::new()
         }
+        Effect::Mirror(on) => {
+            tell(ToCompositor::Mirror(on));
+            Vec::new()
+        }
         Effect::Plug(tool) => {
             tell(ToCompositor::Plug(tool.word().to_owned()));
             Vec::new()
