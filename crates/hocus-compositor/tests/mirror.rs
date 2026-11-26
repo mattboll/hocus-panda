@@ -206,6 +206,9 @@ fn the_picture_is_fitted_with_black_bands() -> anyhow::Result<()> {
     hp.mirror(true);
     // Away from the window, so that the cursor is not over what is read.
     hp.pointer_move(2000.0, 1250.0);
+    // The window opened and moved: its motions over, so that both screens'
+    // last frames show the same picture.
+    common::at_rest(&mut hp)?;
     wait(&mut hp, Duration::from_millis(100))?;
     assert_eq!(
         hp.mirror_fitted(TV),
@@ -534,7 +537,8 @@ fn the_lock_shows_on_the_tv() -> anyhow::Result<()> {
     hp.lock();
     let drawn = hp.dispatch_until(WAIT, Headless::lock_drawn)?;
     assert!(drawn, "the lock never drew");
-    wait(&mut hp, Duration::from_millis(600))?;
+    common::at_rest(&mut hp)?;
+    wait(&mut hp, Duration::from_millis(100))?;
     // The same picture: a few of the laptop's pixels where the TV shows
     // them.
     let mut same = 0;
@@ -603,7 +607,9 @@ fn at_rest_neither_screen_draws() -> anyhow::Result<()> {
     let mapped = hp.dispatch_until(WAIT, |hp| common::rect_of(hp, "test.commits").is_some())?;
     assert!(mapped);
     hp.mirror(true);
-    wait(&mut hp, Duration::from_millis(500))?;
+    // The window's opening over, the screens come to rest.
+    common::at_rest(&mut hp)?;
+    wait(&mut hp, Duration::from_millis(300))?;
     let (laptop_i, tv_i) = (index_of(&hp, LAPTOP), index_of(&hp, TV));
     let before = (hp.frames_on(laptop_i), hp.frames_on(tv_i));
     wait(&mut hp, Duration::from_millis(500))?;

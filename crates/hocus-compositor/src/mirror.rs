@@ -380,6 +380,9 @@ impl State {
         self.commits.set_follows(follows);
         self.share_sources_changed();
         self.tell_shell(ToShell::Mirror(self.mirror_said()));
+        // The bubbles' screen right after: a notification coming at once
+        // shows on a screen of the desktop, never on a mirror.
+        self.flush_bubbles_screen();
         self.displays.wanted = true;
         self.displays.dirty = true;
         self.redraw = true;

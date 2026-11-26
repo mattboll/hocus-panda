@@ -1450,6 +1450,8 @@ fn notifications_are_held_while_mirrored() -> anyhow::Result<()> {
     plug_laptop(&mut bed)?;
     bed.hp.mirror(true);
     bed.logged("the screen is shared: bubbles are held")?;
+    // The laptop's bar, where the bubbles go now.
+    bed.logged("a bar output=\"HEADLESS-2\"")?;
     for (app, urgency) in [("Slack", 1u8), ("Signal", 1), ("Batterie", 2)] {
         let client = bed.client.clone();
         bed.runtime.block_on(async move {
