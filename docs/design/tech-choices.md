@@ -88,7 +88,8 @@ iced's canvas or as SVG.
 - The compositor is installed as a `.deb` for the real session and run
   nested for compositor work, with a different modifier so the host's
   shortcuts don't get in the way.
-- Builds: 8 jobs, mold, sccache (in place since 2026-10-27).
+- Builds: 8 jobs, mold. sccache ran from 2026-10-27 to 11-27 and was
+  dropped: 7 % of compilations hit its 61 GB cache.
 - Acceptance is on the user's machine, against the approved mockups and
   this spec, not against references we recorded ourselves. Headless
   scenarios stay, to keep what works from breaking.
