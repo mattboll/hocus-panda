@@ -174,13 +174,15 @@ pub enum Effect {
         rect: Rectangle,
     },
     /// A layer surface of the shell's beside `bar`, of `namespace` (the
-    /// peek, 4.5): `size`, its margins from the screen's top right (top,
-    /// right, bottom, left); it takes no keyboard.
+    /// peek, 4.5): `size`, anchored to `anchor`'s edges (said for a bar
+    /// on the right), its margins from them (top, right, bottom, left);
+    /// it takes no keyboard.
     Layer {
         id: window::Id,
         bar: String,
         namespace: &'static str,
         size: (u32, u32),
+        anchor: Anchor,
         margin: (i32, i32, i32, i32),
     },
     /// Surface `id` takes the pointer in `rects` only (its own pixels).

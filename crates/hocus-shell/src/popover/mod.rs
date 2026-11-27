@@ -91,7 +91,7 @@ use crate::ui::{
     cone::Cone,
     ring::{Declared, Ring},
 };
-use iced_exwlshell::reexport::KeyboardInteractivity;
+use iced_exwlshell::reexport::{Anchor, KeyboardInteractivity};
 
 /// Hovering a mini form's item this long opens its popover.
 pub const HOVER_OPEN: Duration = Duration::from_millis(150);

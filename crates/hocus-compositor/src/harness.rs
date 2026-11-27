@@ -828,6 +828,24 @@ impl Headless {
         self.app.state.panel.windows_commits
     }
 
+    /// From now on, where the windows' surfaces in the bar are drawn after
+    /// each of their commits (#964): [`Self::windows_places`].
+    pub fn record_windows_places(&mut self) {
+        self.app.state.panel.windows_places = Some(Vec::new());
+    }
+
+    /// Where the windows' surfaces were drawn after each of their commits
+    /// since [`Self::record_windows_places`], by screen (global logical
+    /// pixels): their buffers' size, where the compositor put them.
+    pub fn windows_places(&self) -> &[(String, Rect)] {
+        self.app
+            .state
+            .panel
+            .windows_places
+            .as_deref()
+            .unwrap_or(&[])
+    }
+
     /// The commits of the next meeting's surfaces (Day.2), all bars'.
     pub fn meeting_commits(&self) -> u64 {
         self.app.state.panel.meeting_commits

@@ -880,6 +880,47 @@ fn shot_screens(hp: &mut Headless, what: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A window opened, then two closed: each changes the group's height and
+/// nothing else. Every state of the windows' surface the compositor took
+/// on the way, after each of its commits (its new size, its drawing at
+/// it, ...), shows the group 14 px over the tiles at the bar's side, never
+/// its old buffer at its new top nor its new one at its old (#964).
+#[test]
+fn a_line_added_or_removed_never_shows_the_group_elsewhere() -> anyhow::Result<()> {
+    let Some(mut bed) = start(&Machine::default())? else {
+        return Ok(());
+    };
+    two(&mut bed)?;
+    bed.shows(&format!("«{}»*; «{}»", FIREFOX.1, FOOT.1))?;
+    let (_, tiles) = bed.over_the_tiles(2 * LINE)?;
+    bed.settle()?;
+    bed.hp.record_windows_places();
+    bed.open("test.trois", "Trois")?;
+    bed.shows(&format!("«Trois»*; «{}»; «{}»", FIREFOX.1, FOOT.1))?;
+    bed.over_the_tiles(3 * LINE)?;
+    bed.settle()?;
+    for (app, lines) in [("test.trois", 2), (FIREFOX.0, 1)] {
+        bed.client(app)?.commands.send(Command::Close)?;
+        bed.over_the_tiles(lines * LINE)?;
+        bed.settle()?;
+    }
+    let places = bed.hp.windows_places();
+    let heights = [LINE, 2 * LINE, 3 * LINE].map(|h| h + 2 * ROOM);
+    let wrong: Vec<_> = places
+        .iter()
+        .filter(|(_, r)| {
+            r.x != FULL_X || r.y + r.height - ROOM + GAP != tiles || !heights.contains(&r.height)
+        })
+        .collect();
+    // Grown once and shrunk twice: at least its three new sizes drawn.
+    anyhow::ensure!(places.len() >= 3, "too few commits recorded: {places:?}");
+    anyhow::ensure!(
+        wrong.is_empty(),
+        "the group shown elsewhere than 14 px over the tiles at {tiles}: {wrong:?} of {places:?}"
+    );
+    Ok(())
+}
+
 #[test]
 fn no_window_no_group() -> anyhow::Result<()> {
     let Some(mut bed) = start(&Machine::default())? else {

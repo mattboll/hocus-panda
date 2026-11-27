@@ -51,6 +51,7 @@ use iced::{
     },
     window,
 };
+use iced_exwlshell::reexport::Anchor;
 
 use super::{Words, now_us};
 use crate::pandas::{self, Burst, Mood};
@@ -556,6 +557,7 @@ fn show(shown: Shown, said: Said) {
                         bar: bar.clone(),
                         namespace: PEEK_NAMESPACE,
                         size: placed.size,
+                        anchor: Anchor::Right | Anchor::Top,
                         margin: placed.margin,
                     });
                     id

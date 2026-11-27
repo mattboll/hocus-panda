@@ -123,6 +123,9 @@ pub struct Panel {
     /// Commits of the windows' surfaces in the bar (#604), for tests: none
     /// at rest.
     pub windows_commits: u64,
+    /// Where the windows' surfaces are drawn after each of their commits,
+    /// by screen, while a test records them (#964); none otherwise.
+    pub windows_places: Option<Vec<(String, Rect)>>,
     /// Commits of the connections' surfaces, for tests: none at rest.
     pub connections_commits: u64,
     /// Commits of the desktops' surfaces, for tests: none at rest.

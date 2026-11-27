@@ -195,6 +195,64 @@ fn hold_margins(surface: &WlSurface, output: &Output, whole: Option<Size<i32, Lo
     });
 }
 
+/// A layer surface anchored to the bottom or the right alone, whose buffer
+/// is not yet as large as it asks to be, placed by its buffer for now: that
+/// edge's margin offset by the difference. The layer map places such a
+/// surface by the size asked, so a new size committed before the client
+/// drew at it showed the old buffer off that edge until the next buffer
+/// came: the bar's windows grew from their top, their old lines a line
+/// higher for a frame (#964). Now the old buffer stays against the edge,
+/// where it was, and the new one takes the new size's place. The client's
+/// own margins come back with its next commit.
+fn by_its_buffer(surface: &WlSurface, output: &Output, whole: Option<Size<i32, Logical>>) {
+    let Some(drawn) = with_renderer_surface_state(surface, |s| s.surface_size()).flatten() else {
+        return;
+    };
+    let zone = layer_map_for_output(output).non_exclusive_zone().size;
+    with_states(surface, |states| {
+        let mut cached = states.cached_state.get::<LayerSurfaceCachedState>();
+        let state = cached.current();
+        let room = match state.exclusive_zone {
+            ExclusiveZone::DontCare => whole.unwrap_or(zone),
+            _ => zone,
+        };
+        let (anchor, asked, m) = (state.anchor, state.size, state.margin);
+        // The offset on an axis: none unless anchored to its far edge
+        // alone, at a size of its own that fits.
+        let offset = |near: Anchor, far: Anchor, asked: i32, drawn: i32, room: i32| {
+            let alone = anchor.contains(far) && !anchor.contains(near);
+            if alone && asked > 0 && asked <= room && drawn != asked {
+                drawn - asked
+            } else {
+                0
+            }
+        };
+        let bottom = offset(
+            Anchor::TOP,
+            Anchor::BOTTOM,
+            asked.h,
+            drawn.h,
+            room.h - m.bottom,
+        );
+        let right = offset(
+            Anchor::LEFT,
+            Anchor::RIGHT,
+            asked.w,
+            drawn.w,
+            room.w - m.right,
+        );
+        if (bottom, right) != (0, 0) {
+            tracing::debug!(
+                asked = ?(asked.w, asked.h),
+                drawn = ?(drawn.w, drawn.h),
+                "a layer surface placed by its buffer until it draws at its new size"
+            );
+            state.margin.bottom += bottom;
+            state.margin.right += right;
+        }
+    });
+}
+
 /// Margins (top, right, bottom, left) for a surface anchored to `anchor`,
 /// each axis leaving at least a pixel of `room` (width, height); the
 /// second edge's gives way first.
@@ -293,11 +351,15 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
         }
         let whole = state.space.output_geometry(&output).map(|g| g.size);
         hold_margins(surface, &output, whole);
+        by_its_buffer(surface, &output, whole);
         let before = state.work_area(&output);
         layer_map_for_output(&output).arrange();
         if state.work_area(&output) != before {
             // Snapped, maximised and fullscreen windows follow.
             state.rearrange();
+        }
+        if layer.namespace() == hocus_link::WINDOWS_NAMESPACE {
+            state.windows_placed(&layer, &output);
         }
         let configured = with_states(surface, |states| {
             states
@@ -315,6 +377,26 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
 }
 
 impl State {
+    /// Where the windows' surface `layer` on `output` is drawn after a
+    /// commit, while a test records it (#964): its buffer, where the layer
+    /// map put it.
+    fn windows_placed(&mut self, layer: &LayerSurface, output: &Output) {
+        if self.panel.windows_places.is_none() {
+            return;
+        }
+        let drawn = with_renderer_surface_state(layer.wl_surface(), |s| s.surface_size()).flatten();
+        let origin = self.space.output_geometry(output).map(|g| g.loc);
+        let at = layer_map_for_output(output).layer_geometry(layer);
+        let (Some(size), Some(origin), Some(at)) = (drawn, origin, at) else {
+            return;
+        };
+        let rect =
+            crate::model::Rect::new(origin.x + at.loc.x, origin.y + at.loc.y, size.w, size.h);
+        if let Some(places) = self.panel.windows_places.as_mut() {
+            places.push((output.name(), rect));
+        }
+    }
+
     /// The layer surface under `pos` that stands `stand` the windows
     /// (front first), and where the surface found is.
     pub fn layer_surface_under(

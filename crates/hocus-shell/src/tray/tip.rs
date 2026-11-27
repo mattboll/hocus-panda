@@ -21,6 +21,7 @@ use iced::{
     },
     window,
 };
+use iced_exwlshell::reexport::Anchor;
 
 use crate::theme::Ink;
 use crate::{
@@ -214,6 +215,7 @@ pub fn tick(now: Instant) -> Vec<Effect> {
             bar,
             namespace: TIP_NAMESPACE,
             size: (w, h),
+            anchor: Anchor::Right | Anchor::Top,
             margin,
         },
         Effect::Region {

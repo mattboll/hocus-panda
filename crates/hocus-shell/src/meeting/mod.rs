@@ -42,6 +42,7 @@ use hocus_day::{
 };
 use hocus_link::{EDGE, Form, MEETING_NAMESPACE, MeetingNear, ToCompositor};
 use iced::window;
+use iced_exwlshell::reexport::Anchor;
 use jiff::{Timestamp, Zoned};
 
 use crate::{
@@ -454,6 +455,7 @@ impl Place {
                     bar: bar.to_owned(),
                     namespace: MEETING_NAMESPACE,
                     size,
+                    anchor: Anchor::Right | Anchor::Top,
                     margin,
                 }]
             }

@@ -4868,7 +4868,11 @@ The draft's mockup: https://claude.ai/artifact/PaF3yATgWkqw93aJYYSnmF.
   14 px over them; To do's lines and the agents' rows never give way to
   them; on a short bar their lines fold into "+ N", and without room for
   one line and "+ N" the group does not show. A change of focus only
-  reorders the lines: its height stays, nothing moves.
+  reorders the lines: its height stays, nothing moves. The surface is
+  placed from the bar's bottom, so a line added or gone changes its size
+  alone; the compositor keeps a surface placed from the bottom (or the
+  right) against that edge with its old buffer until the client draws at
+  its new size, and the group never shows a frame elsewhere (#964).
 - **The mini form**: the first listed window's icon (20 px) in a 44 × 34
   button (radius 10) 14 px over the dots, lit `0.06` under the pointer,
   `0.08` while its popover shows; a 150 ms hover or a click opens the

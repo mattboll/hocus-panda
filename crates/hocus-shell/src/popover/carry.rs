@@ -208,6 +208,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
             bar,
             namespace,
             size,
+            anchor,
             margin,
         } => {
             crate::side::opened(id);
@@ -216,7 +217,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 NewLayerShellSettings {
                     size: crate::layer::size(size),
                     layer: Layer::Top,
-                    anchor: crate::side::anchor(Anchor::Right | Anchor::Top),
+                    anchor: crate::side::anchor(anchor),
                     exclusive_zone: Some(0),
                     margin: Some(crate::layer::margin(crate::side::margin(margin))),
                     keyboard_interactivity: KeyboardInteractivity::None,
