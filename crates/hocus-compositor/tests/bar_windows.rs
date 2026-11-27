@@ -46,6 +46,8 @@ const EDGE: i32 = 8;
 const GAP: i32 = 14;
 const LINE: i32 = 30;
 const MORE: i32 = 20;
+/// The mini form's item.
+const ITEM: i32 = 34;
 
 /// The next meeting at 14:25 and two events after it: the card and Today.
 const DAY: &str = r##"
@@ -235,6 +237,34 @@ fn plain(log: &Path) -> String {
     out
 }
 
+/// The windows' surface and the tiles' top, if drawn now with the
+/// windows' group `height` tall and 14 px over the desktops' tiles (or
+/// dots) as they are drawn: each is a surface of its own, and the shell's
+/// commits come in either order (#961).
+fn over_the_tiles(hp: &Headless, height: i32) -> Option<(Rect, i32)> {
+    let tiles = hp.drawn_layers(DESKTOPS_NAMESPACE).first()?.1.y + ROOM;
+    let group = hp.drawn_layers(WINDOWS_NAMESPACE).first()?.1;
+    (group.height == height + 2 * ROOM && group.y + group.height - ROOM + GAP == tiles)
+        .then_some((group, tiles))
+}
+
+/// The height of the group whose items a line at rest lists (`items=`):
+/// its lines and its "+ N", or the mini form's item.
+fn items_height(line: &str) -> Option<i32> {
+    let items = line.split(" items=").nth(1)?;
+    items
+        .split_whitespace()
+        .take_while(|i| i.contains('@'))
+        .map(|i| match i.split_once('@').map_or(i, |(name, _)| name) {
+            name if name.starts_with("WindowClose(") => Some(0),
+            name if name.starts_with("Window(") => Some(LINE),
+            "WindowsMore" => Some(MORE),
+            "Windows" => Some(ITEM),
+            _ => None,
+        })
+        .sum()
+}
+
 /// Whether the windows show no group: their surface, kept with the bar,
 /// shorter than a line, drawing nothing (or not there yet).
 fn no_group(hp: &Headless) -> bool {
@@ -357,16 +387,38 @@ impl Bed {
     }
 
     /// Where `item` (as the windows log it: `Window(3)`) is on the screen
-    /// of a `width` wide screen, from the last line drawn at rest.
+    /// of a `width` wide screen, from the last line drawn at rest, once the
+    /// windows' surface is drawn where that line places its items: as tall
+    /// as they are, 14 px over the tiles ([`over_the_tiles`]). The shell
+    /// places them for the surface it asked for, and its new size and its
+    /// new margins reach the compositor in commits of their own: between
+    /// them the surface shows at its new place at its old size (or the
+    /// reverse), drawn all the same, its lines 30 px from where the line
+    /// says, and a press there lands on the next line (#963).
     fn item_at(&mut self, item: &str, width: u32) -> anyhow::Result<(f64, f64)> {
-        let line = self.last_is(AT_REST, &[&format!("{item}@")])?;
-        let at = line
-            .split(&format!("{item}@"))
-            .nth(1)
-            .and_then(|r| r.split_whitespace().next())
-            .and_then(|r| r.split_once(','))
-            .ok_or_else(|| anyhow::anyhow!("no {item} in {line:?}"))?;
-        let (x, y): (f64, f64) = (at.0.parse()?, at.1.parse()?);
+        let log = self.log.clone();
+        let key = format!("{item}@");
+        let placed = |hp: &Headless| -> Option<(f64, f64)> {
+            let text = plain(&log);
+            let line = text.lines().rev().find(|l| l.contains(AT_REST))?;
+            let (x, y) = line
+                .split(&key)
+                .nth(1)?
+                .split_whitespace()
+                .next()?
+                .split_once(',')?;
+            over_the_tiles(hp, items_height(line)?)?;
+            Some((x.parse().ok()?, y.parse().ok()?))
+        };
+        let done = self.hp.dispatch_until(WAIT, |hp| placed(hp).is_some())?;
+        anyhow::ensure!(
+            done,
+            "{item} never drawn where the shell's last line at rest places it: {:?} over {:?}\n{}",
+            self.hp.layer_rects(WINDOWS_NAMESPACE),
+            self.hp.layer_rects(DESKTOPS_NAMESPACE),
+            self.windows_log()
+        );
+        let (x, y) = placed(&self.hp).unwrap_or_default();
         Ok((f64::from(width) - f64::from(EDGE) + x, f64::from(EDGE) + y))
     }
 
@@ -424,23 +476,16 @@ impl Bed {
     /// the tiles' new place while the tiles still show at their old one
     /// (#961).
     fn over_the_tiles(&mut self, height: i32) -> anyhow::Result<(Rect, i32)> {
-        let both = |hp: &Headless| {
-            let tiles = hp.drawn_layers(DESKTOPS_NAMESPACE).first()?.1.y + ROOM;
-            let group = hp.drawn_layers(WINDOWS_NAMESPACE).first()?.1;
-            Some((group, tiles))
-        };
-        let done = self.hp.dispatch_until(WAIT, |hp| {
-            both(hp).is_some_and(|(group, tiles)| {
-                group.height == height + 2 * ROOM && group.y + group.height - ROOM + GAP == tiles
-            })
-        })?;
+        let done = self
+            .hp
+            .dispatch_until(WAIT, |hp| over_the_tiles(hp, height).is_some())?;
         anyhow::ensure!(
             done,
             "the windows never {height} px tall 14 px over the tiles: {:?} over {:?}",
             self.hp.layer_rects(WINDOWS_NAMESPACE),
             self.hp.layer_rects(DESKTOPS_NAMESPACE)
         );
-        both(&self.hp).ok_or_else(|| anyhow::anyhow!("no windows or no tiles drawn"))
+        over_the_tiles(&self.hp, height).ok_or_else(|| anyhow::anyhow!("no windows or no tiles"))
     }
 
     /// Waits until client `app` was asked to close its window.
@@ -973,7 +1018,7 @@ fn the_mini_form_lists_them_in_a_popover() -> anyhow::Result<()> {
     bed.open("org.gnome.TextEditor", "Notes de réunion")?;
     bed.last_is(AT_REST, &["form=mini", "item=Some(\"Notes de réunion\")"])?;
     // The item, 44 × 34, 14 px over the dots.
-    let (item, _) = bed.over_the_tiles(34)?;
+    let (item, _) = bed.over_the_tiles(ITEM)?;
     // A click opens the popover: three lines and "+ 1 autre".
     bed.click("Windows")?;
     bed.last_is(
