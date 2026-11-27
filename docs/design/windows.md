@@ -1597,6 +1597,18 @@ page, "Rouvrir les applications de la dernière session", settings.md).
   every application came back or failed, one notification (5.3) names
   those that did not: "Slack et Signal n’ont pas pu être rouvertes." /
   "Slack and Signal could not be reopened."
+- **Terminals** (#967): a terminal comes back in the folder of what ran
+  in its foreground as the session ended (the program in its shell's
+  foreground, herdr or an agent, else the shell; never a helper the
+  terminal keeps on its own terminal, as kitty's `kitten`s, in the folder
+  the terminal started in). One that ran herdr or an agent comes back
+  with it as a project's does, on any desktop (projects.md §8.1, "One
+  herdr session per project"): saved as the session ends as
+  `[window.herdr]` (herdr's session) or `[window.agent]` (the agent's
+  conversation), it starts attached to that herdr session, or running
+  `claude --resume ID` (`codex resume ID`) in the agent's folder, `exec
+  $SHELL` after; with the same checks and the same notification when it
+  cannot. The saves of every 3 s keep it a plain terminal in its folder.
 - Until they come back, the saved windows waiting stay in what is saved:
   a log out meanwhile loses none.
 - **Browsers** (2026-11-19, projects.md "Log out keeps every window"):

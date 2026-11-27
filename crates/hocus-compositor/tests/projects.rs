@@ -2720,6 +2720,23 @@ fn herdr_terminal(
     Ok((terminal, id))
 }
 
+/// A fake `herdr` program in `bin`: it writes its arguments into
+/// `marks/herdr`.
+fn fake_herdr_program(places: &Places, bin: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(bin)?;
+    let program = bin.join("herdr");
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n",
+            places.root.join("marks/herdr").display()
+        ),
+    )?;
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))?;
+    Ok(())
+}
+
 /// Runs until agent `name`'s window is `window`; its id.
 fn agent_in(hp: &mut Headless, name: &str, window: WindowId) -> anyhow::Result<u64> {
     for _ in 0..100 {
@@ -2809,20 +2826,7 @@ fn a_project_keeps_its_herdr_session_and_attaches_to_it_again() -> anyhow::Resul
     let bin = home.join("bin");
     let folder = places.folder.canonicalize()?;
     agent_terminal(&places, &bin, &home)?;
-    std::fs::create_dir_all(&bin)?;
-    // A fake herdr program: it writes its arguments.
-    let program = bin.join("herdr");
-    std::fs::write(
-        &program,
-        format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n",
-            places.root.join("marks/herdr").display()
-        ),
-    )?;
-    std::fs::set_permissions(
-        &program,
-        <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755),
-    )?;
+    fake_herdr_program(&places, &bin)?;
     let transcript = home.join("t.jsonl");
     std::fs::write(&transcript, "{}\n")?;
     herdr_session(&home, "alpha", "site", (ALPHA_SERVER, ALPHA_PANE))?;
@@ -3001,6 +3005,165 @@ fn a_herdr_session_gone_resumes_its_agents_each_in_a_terminal() -> anyhow::Resul
         hp.project_not_back().is_none(),
         "{:?}",
         hp.project_not_back()
+    );
+    Ok(())
+}
+
+// --- Log out and log in, off any project (#967) ------------------------------------------
+
+/// A terminal running herdr and one running Claude Code, on a desktop of
+/// no project, are saved at log out with herdr's session and the agent's
+/// conversation, and come back at log in running them: `herdr session
+/// attach alpha`, `claude --resume ID` in its folder, as a project's.
+#[test]
+fn a_terminal_off_a_project_comes_back_running_its_herdr_or_its_agent() -> anyhow::Result<()> {
+    let places = places()?;
+    let home = places.root.join("home");
+    let bin = home.join("bin");
+    let folder = places.folder.canonicalize()?;
+    let transcript = home.join(format!(".claude/projects/x/{SESSION}.jsonl"));
+    std::fs::create_dir_all(transcript.parent().context("its folder")?)?;
+    std::fs::write(&transcript, "{}\n")?;
+    let wrapper = agent_terminal(&places, &bin, &home)?;
+    fake_herdr_program(&places, &bin)?;
+    herdr_session(&home, "alpha", "site", (ALPHA_SERVER, ALPHA_PANE))?;
+    let config = Config {
+        home: Some(home.clone()),
+        agent_places: Some(herdr_places(&home, &bin)),
+        ..config_with_apps(&places)
+    };
+    let mut hp = alone_with(config.clone())?;
+    hp.restore_session();
+    let socket = hp
+        .control_socket()
+        .context("no control socket")?
+        .to_path_buf();
+    let (mut one, herdr) = herdr_terminal(
+        &mut hp,
+        &home,
+        "herdr session attach alpha",
+        (ALPHA_SHELL, ALPHA_CLIENT),
+        &["herdr", "session", "attach", "alpha"],
+    )?;
+    agent_in(&mut hp, "site", herdr)?;
+    let mut two = std::process::Command::new("sh")
+        .arg(&wrapper)
+        .current_dir(&folder)
+        .env("WAYLAND_DISPLAY", hp.socket())
+        .spawn()?;
+    let said = format!(
+        "agent claude-code {SESSION} working {} hocus-site\tcwd {}\ttranscript {}\n",
+        two.id(),
+        folder.display(),
+        transcript.display()
+    );
+    UnixStream::connect(&socket)?.write_all(said.as_bytes())?;
+    let other = |hp: &Headless| hp.all_windows().iter().map(|w| w.0).find(|w| *w != herdr);
+    let shown = hp.dispatch_until(WAIT, |hp| other(hp).is_some())?;
+    anyhow::ensure!(shown, "no agent's terminal: {:?}", hp.all_windows());
+    let window = other(&hp).context("its window")?;
+    agent_in(&mut hp, "hocus-site", window)?;
+    hp.end_session();
+    let saved = std::fs::read_to_string(places.root.join("state/hocuspanda/session"))?;
+    assert!(
+        saved.contains("[window.herdr]\nsession = \"alpha\""),
+        "{saved}"
+    );
+    assert!(
+        saved.contains(&format!(
+            "[window.agent]\ntool = \"claude-code\"\nsession = \"{SESSION}\""
+        )),
+        "{saved}"
+    );
+    drop(hp);
+    let _ = one.wait();
+    let _ = two.wait();
+
+    // Log in: each terminal running what it ran.
+    let mut hp = alone_with(config)?;
+    hp.restore_session();
+    let socket = hp
+        .control_socket()
+        .context("no control socket")?
+        .to_path_buf();
+    fake_claude(&places, &bin, &socket)?;
+    let bar = common::client(hp.socket(), Some(common::Shows::ClearBar))?;
+    std::mem::forget(bar);
+    let back = hp.dispatch_until(WAIT, |hp| !hp.session_restoring())?;
+    anyhow::ensure!(back, "not back: {:?}", hp.all_windows());
+    assert_eq!(
+        marks_of(&places, "claude"),
+        [(format!("--resume {SESSION}"), folder.clone())]
+    );
+    let attached = hp.dispatch_until(WAIT, |_| places.root.join("marks/herdr").exists())?;
+    anyhow::ensure!(attached, "herdr never started");
+    assert_eq!(
+        std::fs::read_to_string(places.root.join("marks/herdr"))?,
+        "session attach alpha\n"
+    );
+    assert!(
+        hp.session_not_back().is_empty(),
+        "{:?}",
+        hp.session_not_back()
+    );
+    Ok(())
+}
+
+/// A shell that went into another folder to run a program there (a
+/// subshell: the shell itself stays where it was) is saved at log out in
+/// that program's folder, and its terminal comes back there (#967).
+#[test]
+fn a_terminal_comes_back_in_the_folder_of_the_program_it_ran() -> anyhow::Result<()> {
+    let places = places()?;
+    let folder = places.folder.canonicalize()?;
+    let inside = folder.join("src");
+    std::fs::create_dir_all(&inside)?;
+    let wrapper = terminal_wrapper(
+        &places,
+        Some(&format!("(cd {} && exec sleep 601)", inside.display())),
+        None,
+    )?;
+    let mut hp = alone_with(config_with_apps(&places))?;
+    hp.restore_session();
+    let mut started = std::process::Command::new("sh")
+        .arg(&wrapper)
+        .current_dir(&folder)
+        .env("WAYLAND_DISPLAY", hp.socket())
+        .spawn()?;
+    window_of(&mut hp, "foot")?;
+    let file = places.root.join("state/hocuspanda/session");
+    let wanted = format!(
+        "[window.terminal]\nfolder = {:?}",
+        inside.display().to_string()
+    );
+    // Its program takes a moment to be in its shell's foreground.
+    let mut saved = String::new();
+    for _ in 0..50 {
+        hp.end_session();
+        saved = std::fs::read_to_string(&file).unwrap_or_default();
+        if saved.contains(&wanted) {
+            break;
+        }
+        wait(&mut hp, Duration::from_millis(100))?;
+    }
+    assert!(saved.contains(&wanted), "{saved}");
+    drop(hp);
+    let _ = started.wait();
+
+    let mut hp = alone_with(config_with_apps(&places))?;
+    hp.restore_session();
+    let bar = common::client(hp.socket(), Some(common::Shows::ClearBar))?;
+    std::mem::forget(bar);
+    let back = hp.dispatch_until(WAIT, |hp| !hp.session_restoring())?;
+    anyhow::ensure!(back, "not back: {:?}", hp.all_windows());
+    let marks = terminal_marks(&places);
+    assert_eq!(
+        marks.last(),
+        Some(&(
+            format!("--working-directory={}", inside.display()),
+            inside.clone()
+        )),
+        "{marks:?}"
     );
     Ok(())
 }
