@@ -80,7 +80,7 @@ sharing).
   `~/github/hocus-panda-tools/weekly-stress hocus-panda` (every test file
   changed in the last 7 days, 20 times in a row under load; its report in
   `~/.local/state/hocus-panda/weekly-stress/`). Each failure there, like
-  each test that fails by chance on CI, gets an issue and is quarantined
+  each test CI reports FLAKY, gets an issue and is quarantined
   the same day (docs/workflow.md, "A test that fails by chance").
 - Commit messages in English, `area: what changes`. **No attribution
   trailers** (`Co-Authored-By`, `Claude-Session`, "Generated with…") in
@@ -156,8 +156,8 @@ runs everything, as main does: built once, then four jobs. So does
 every push to a sprint branch. After each merge, main runs the whole suite; a failure
 there is fixed at once; a test that fails by chance is quarantined from
 CI (`[profile.ci]` in `.config/nextest.toml`) until its issue's fix
-takes it out (docs/workflow.md, "A test that fails by chance": no
-retries, no fail-fast). A test fails, never skips, when a system program
+takes it out (docs/workflow.md, "A test that fails by chance": one
+retry, reported FLAKY; no fail-fast). A test fails, never skips, when a system program
 it runs is missing (`common::missing`); tests and the programs they start
 run with `TZ=UTC` and `LANG=C.UTF-8` (`.cargo/config.toml`). Update this
 section as commands land.

@@ -33,9 +33,14 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 # Every test runs whatever fails before it: a first failure hid the rest of
 # its shard, and the next run found the next one (#769).
 fail-fast = false
-# No retries: a test that passes at its second try has failed, and is
-# reported as such (docs/workflow.md, "A test that fails by chance").
-retries = 0
+# One retry: a test that passes at its second try keeps the run green, so
+# that no pull request waits on a chance failure, but nextest reports it
+# FLAKY in the run's log, and it has failed: weekly-stress lists the week's
+# FLAKY tests from CI's logs, and each gets an issue (docs/workflow.md, "A test that fails
+# by chance").
+# With no retry, chance failures turned a quarter of the runs red
+# (28 of 114 from 2026-11-20 to 11-27).
+retries = 1
 # What CI's machines lack (.github/workflows/ci.yml installs neither
 # Xwayland, nor a terminal, nor AT-SPI's launcher and Python binding): a
 # test fails without the programs it needs, so these are left out there,
