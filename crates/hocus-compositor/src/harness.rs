@@ -1823,13 +1823,27 @@ impl Headless {
     /// Ends the shell at once (`SIGKILL`), as a crash would: the process
     /// of its Wayland connection, which the test started.
     pub fn kill_shell(&self) -> anyhow::Result<()> {
-        use rustix::process::{Pid, Signal, kill_process};
+        self.signal_shell(rustix::process::Signal::KILL)
+    }
+
+    /// Stops the shell (`SIGSTOP`), or lets it go on (`SIGCONT`): a shell
+    /// busy for a moment, drawing or waking its GPU, reads none of what
+    /// the compositor sends it meanwhile (#954).
+    pub fn pause_shell(&self, paused: bool) -> anyhow::Result<()> {
+        use rustix::process::Signal;
+        self.signal_shell(if paused { Signal::STOP } else { Signal::CONT })
+    }
+
+    /// `signal` to the shell's own process, which the test started; never
+    /// to the test's.
+    fn signal_shell(&self, signal: rustix::process::Signal) -> anyhow::Result<()> {
+        use rustix::process::{Pid, kill_process};
         let pid = self
             .shell_pid()
             .filter(|pid| u32::try_from(*pid).ok() != Some(std::process::id()))
             .and_then(Pid::from_raw)
             .context("no shell")?;
-        kill_process(pid, Signal::KILL).with_context(|| format!("killing the shell ({pid:?})"))?;
+        kill_process(pid, signal).with_context(|| format!("{signal:?} to the shell ({pid:?})"))?;
         Ok(())
     }
 
