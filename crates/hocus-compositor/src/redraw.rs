@@ -411,10 +411,13 @@ impl State {
         let right = f64::from((bbox.loc.x + bbox.size.w - geometry.loc.x - geometry.size.w).max(0));
         let bottom =
             f64::from((bbox.loc.y + bbox.size.h - geometry.loc.y - geometry.size.h).max(0));
-        let area = Rectangle::new(
-            visual.loc - Point::from((left + 1.0, top + 1.0)),
-            visual.size + Size::from((left + right + 2.0, top + bottom + 2.0)),
-        );
+        // Out to the whole pixels it touches, no further: a pixel more
+        // each way had the screen beside a window against their shared
+        // edge build a scene, empty, at each of its frames (#948).
+        let (x0, y0) = ((visual.loc.x - left).floor(), (visual.loc.y - top).floor());
+        let x1 = (visual.loc.x + visual.size.w + right).ceil();
+        let y1 = (visual.loc.y + visual.size.h + bottom).ceil();
+        let area = Rectangle::new((x0, y0).into(), (x1 - x0, y1 - y0).into());
         let now_on = self.screens_over(area);
         *drawn = Some(Covered {
             visual,
