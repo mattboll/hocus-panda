@@ -859,7 +859,8 @@ impl State {
         {
             return;
         }
-        self.pointer_refocus(time);
+        // No layer surface above the windows under it: not looked for again.
+        self.pointer_refocus(time, true);
     }
 
     /// The pointer's focus to what is under it now, if that is no longer
@@ -867,7 +868,9 @@ impl State {
     /// it last moved, and a press would go to what was there, not to what
     /// is shown (#692). Not while a grab holds the pointer, nor over a
     /// window's frame, where no client has it.
-    fn pointer_refocus(&mut self, time: u32) {
+    /// `above_seen`: no layer surface above the windows is under it, as
+    /// the caller found.
+    fn pointer_refocus(&mut self, time: u32, above_seen: bool) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -875,7 +878,12 @@ impl State {
             return;
         }
         let at = pointer.current_location();
-        let under = self.surface_under(at).map(|(surface, _)| surface);
+        let under = if above_seen && !self.locked() {
+            self.surface_under_windows(at)
+        } else {
+            self.surface_under(at)
+        }
+        .map(|(surface, _)| surface);
         if under != pointer.current_focus() {
             self.pointer_motion(at, time);
         }
@@ -949,7 +957,7 @@ impl State {
             }
         }
         if state == ButtonState::Pressed {
-            self.pointer_refocus(time);
+            self.pointer_refocus(time, false);
             self.pointer.last_press = Some((pointer.current_location(), self.now()));
         }
         // A press away from the authentication dialog does nothing (7.5).

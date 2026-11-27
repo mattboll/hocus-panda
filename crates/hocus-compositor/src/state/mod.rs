@@ -489,18 +489,31 @@ impl State {
         if self.locked() {
             return self.lock_surface_under(pos);
         }
-        let layer = |stand| self.layer_surface_under(pos, stand).map(|(s, p, _)| (s, p));
-        layer(Stand::Above)
-            .or_else(|| {
-                // Where its surface's origin is, its geometry's corner less
-                // its client-side shadow.
-                self.space.element_under(pos).and_then(|(window, origin)| {
-                    window
-                        .surface_under(pos - origin.to_f64(), WindowSurfaceType::ALL)
-                        .map(|(s, p)| (s, (p + origin).to_f64()))
-                })
+        self.layer_surface_under(pos, Stand::Above)
+            .map(|(s, p, _)| (s, p))
+            .or_else(|| self.surface_under_windows(pos))
+    }
+
+    /// The surface under `pos` where no layer surface above the windows
+    /// is, unlocked: a window's, then the bottom and background layers'.
+    pub(crate) fn surface_under_windows(
+        &self,
+        pos: Point<f64, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        use crate::handlers::layer_shell::Stand;
+        // Where its surface's origin is, its geometry's corner less its
+        // client-side shadow.
+        self.space
+            .element_under(pos)
+            .and_then(|(window, origin)| {
+                window
+                    .surface_under(pos - origin.to_f64(), WindowSurfaceType::ALL)
+                    .map(|(s, p)| (s, (p + origin).to_f64()))
             })
-            .or_else(|| layer(Stand::Below))
+            .or_else(|| {
+                self.layer_surface_under(pos, Stand::Below)
+                    .map(|(s, p, _)| (s, p))
+            })
     }
 
     /// The window under `pos`, if no layer surface above the windows is.

@@ -338,11 +338,15 @@ impl State {
             ],
         };
         let map = layer_map_for_output(output);
+        // Each surface's layer read once, not once a pass (#948): asked at
+        // each turn of the loop, under the still pointer.
+        let layers: Vec<(&LayerSurface, Layer)> = map.layers().map(|l| (l, l.layer())).collect();
         for (layer, pick) in passes {
             if pick == Pick::Nothing {
                 continue;
             }
-            for surface in map.layers_on(layer).rev() {
+            let on = layers.iter().rev().filter(|(_, l)| *l == layer);
+            for &(surface, _) in on {
                 // The lock's surfaces take the pointer through the lock
                 // alone, while it holds (7.1).
                 if !pick.takes(surface.namespace())
