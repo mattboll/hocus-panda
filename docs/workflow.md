@@ -134,8 +134,16 @@ a suite that hides it gets worse without anyone seeing. So:
   `scripts/dev/stress.sh` first (below). "It passed again" closes
   nothing.
 
-**Before a pull request**, a new or changed test passes
-`scripts/dev/stress.sh` 20 times: it runs the tests a nextest filter
+**Once a week**, not before each pull request, a timer runs
+`~/github/hocus-panda-tools/weekly-stress hocus-panda`: every test file
+changed in the last 7 days, 20 times in a row under load, its report in
+`~/.local/state/hocus-panda/weekly-stress/`; each failure gets an issue
+and the quarantine above. Local runs before a pull request did not keep
+CI green (28 failed runs from 2026-11-20 to 11-27, on tests stressed
+here first), and cost a third of the agents' build time.
+
+**By hand**, to reproduce a chance failure or to show that its fix holds,
+`scripts/dev/stress.sh` runs the tests a nextest filter
 selects 20 times in a row (`-n` for more), on two cores (`-c 0-1`) beside
 two busy loops pinned on the same cores (`-l`), four at a time as on CI
 (`-j`), without retries, and stops at the first failure, which it prints.
