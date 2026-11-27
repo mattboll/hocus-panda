@@ -1,5 +1,7 @@
 //! Desktops across several screens, headless (docs/design/windows.md §12,
-//! issue #420): each screen keeps its own desktops, switching alone; the
+//! issue #420): each screen keeps its own desktops, switching alone when
+//! they are not linked (`per-screen = true`; linked, #947, is
+//! `desktops_linked`'s); the
 //! bar on the primary screen shows every screen's, its own first, then the
 //! others left to right; `Super+Alt+←/→` sends the focused window to the
 //! screen on that side, onto the desktop it shows, at the same share of
@@ -12,7 +14,7 @@ use common::{
     two_screens, wait_for_rect,
 };
 use hocus_compositor::{
-    Config, Headless, HeadlessConfig, OutputSpec, PanelScreens, RendererChoice,
+    Config, DesktopSwitching, Headless, HeadlessConfig, OutputSpec, PanelScreens, RendererChoice,
     model::{self, Mode, WindowId, Zone},
 };
 
@@ -49,6 +51,21 @@ fn shown(hp: &Headless) -> Vec<(String, usize)> {
         .collect()
 }
 
+/// The two screens of [`two_screens`], each switching its desktops alone
+/// (`[desktops] per-screen = true`, #420; linked is `desktops_linked`'s).
+fn per_screen() -> anyhow::Result<Headless> {
+    let mut config = Config::default();
+    config.desktops.switching = DesktopSwitching::PerScreen;
+    Headless::start_with(
+        HeadlessConfig {
+            outputs: vec![OutputSpec::new(1920, 1080), OutputSpec::new(2560, 1440)],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        config,
+    )
+}
+
 /// The screens whose desktops bar `bar` shows, in its rows' order.
 fn rows(hp: &Headless, bar: &str) -> Vec<String> {
     hp.state()
@@ -61,7 +78,7 @@ fn rows(hp: &Headless, bar: &str) -> Vec<String> {
 #[test]
 fn each_screen_switches_alone_and_the_primary_bar_shows_every_screens_desktops()
 -> anyhow::Result<()> {
-    let mut hp = two_screens()?;
+    let mut hp = per_screen()?;
     // The bar on the first screen alone shows both rows, its own first.
     assert_eq!(rows(&hp, FIRST), [FIRST, SECOND]);
     hp.pointer_move(960.0, 540.0);
@@ -104,7 +121,7 @@ fn a_screen_unplugged_takes_its_row_away_and_plugged_back_brings_it() -> anyhow:
 #[test]
 fn super_alt_right_sends_the_window_to_the_screens_shown_desktop_at_the_same_share()
 -> anyhow::Result<()> {
-    let mut hp = two_screens()?;
+    let mut hp = per_screen()?;
     let areas = hp.work_areas();
     anyhow::ensure!(areas.len() == 2, "two work areas: {areas:?}");
     // The second screen shows its second desktop.
@@ -170,7 +187,7 @@ fn a_snapped_window_takes_the_same_zone_there() -> anyhow::Result<()> {
 
 #[test]
 fn a_window_dragged_onto_another_screen_goes_on_the_desktop_it_shows() -> anyhow::Result<()> {
-    let mut hp = two_screens()?;
+    let mut hp = per_screen()?;
     hp.pointer_move(1920.0 + 1280.0, 720.0);
     chord(&mut hp, &[KEY_LEFTMETA, KEY_2]);
     hp.pointer_move(960.0, 540.0);

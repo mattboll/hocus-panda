@@ -83,8 +83,9 @@ impl Coming {
 
 #[derive(Debug, Default)]
 pub struct Gestures {
-    /// The screen whose strip follows three fingers on the touchpad.
-    pub swiping: Option<Output>,
+    /// The screens whose strips follow three fingers on the touchpad (all
+    /// of them when linked, #947); none while no swipe goes on.
+    pub swiping: Vec<Output>,
     /// The touchpad's swipe, and whether the desktop takes it (6.13).
     pub hold: crate::gestures::Hold,
     /// Swipes given to clients so far, and their moves, for tests.

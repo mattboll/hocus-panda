@@ -61,6 +61,17 @@ fn bed_on(shell: bool, text: &str, a11y: Option<String>) -> anyhow::Result<Bed> 
 /// The same, the shell serving the notifications on a bus of the test's
 /// own when `bell` (#923).
 fn bed_of(shell: bool, text: &str, a11y: Option<String>, bell: bool) -> anyhow::Result<Bed> {
+    bed_in(shell, text, a11y, bell, &["1920x1080"])
+}
+
+/// The same, on these screens.
+fn bed_in(
+    shell: bool,
+    text: &str,
+    a11y: Option<String>,
+    bell: bool,
+    screens: &[&str],
+) -> anyhow::Result<Bed> {
     let dir = tempfile::tempdir()?;
     let root = dir.path();
     let bus = if bell {
@@ -87,7 +98,10 @@ fn bed_of(shell: bool, text: &str, a11y: Option<String>, bell: bool) -> anyhow::
         ..Config::default()
     };
     let headless = HeadlessConfig {
-        outputs: vec!["1920x1080".parse()?],
+        outputs: screens
+            .iter()
+            .map(|s| s.parse())
+            .collect::<Result<_, _>>()?,
         renderer: RendererChoice::Pixman,
         render_node: None,
     };
@@ -1926,5 +1940,33 @@ fn shots_bell() -> anyhow::Result<()> {
         common::wait(&mut bed.hp, std::time::Duration::from_millis(600))?;
         shoot(&mut bed.hp, &out, name)?;
     }
+    Ok(())
+}
+
+/// #947, scenario 25: the screens linked (the default), `switch_desktop`
+/// naming the first screen puts both on desktop 3, its answer listing
+/// both; `list_desktops` says they are linked.
+#[test]
+fn linked_switch_desktop_switches_every_screen_and_says_so() -> anyhow::Result<()> {
+    let mut bed = bed_in(false, CONFIG, None, false, &["1920x1080", "2560x1440"])?;
+    let mut agent = mcp(&bed.hp, "Claude")?;
+    let listed = agent.tool(&mut bed.hp, "list_desktops", json!({}))?;
+    assert_eq!(listed["structuredContent"]["linked"], true, "{listed}");
+    let result = agent.tool(
+        &mut bed.hp,
+        "switch_desktop",
+        json!({ "desktop": 3, "output": "HEADLESS-1", "intent": "Montre le bureau 3" }),
+    )?;
+    assert_eq!(result["isError"], false, "{result}");
+    let shown: Vec<usize> = bed.hp.strips().into_iter().map(|(_, _, c)| c).collect();
+    assert_eq!(shown, [2, 2]);
+    assert_eq!(
+        result["structuredContent"]["screens"],
+        json!([
+            { "output": "HEADLESS-1", "desktop": 3 },
+            { "output": "HEADLESS-2", "desktop": 3 },
+        ]),
+        "{result}"
+    );
     Ok(())
 }

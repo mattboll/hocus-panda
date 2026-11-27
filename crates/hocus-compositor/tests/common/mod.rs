@@ -16,7 +16,7 @@ use smithay_client_toolkit::{
         DataDeviceManagerState, WritePipe,
         data_device::{DataDevice, DataDeviceHandler},
         data_offer::{DataOfferHandler, DragOffer},
-        data_source::{CopyPasteSource, DataSourceHandler},
+        data_source::{CopyPasteSource, DataSourceHandler, DragSource},
     },
     delegate_activation, delegate_compositor, delegate_data_device, delegate_layer,
     delegate_output, delegate_pointer, delegate_registry, delegate_seat, delegate_shm,
@@ -236,6 +236,8 @@ pub const DAEMON_WAIT: Duration = Duration::from_secs(30);
 
 /// A D-Bus daemon of the test's own, its socket `bus` in `dir` (its
 /// configuration beside it), and its address, once it takes connections.
+/// The services of a `services` folder in `dir`, if there is one, are
+/// activatable there (a name that a call would start: #957's KDE Connect).
 ///
 /// Its socket's file comes as the daemon binds it, a moment before it
 /// listens: a connection then is refused. It prints its address
@@ -247,12 +249,18 @@ pub fn private_bus(dir: &Path) -> anyhow::Result<(std::process::Child, String)> 
     };
     let socket = dir.join("bus");
     let config = dir.join("bus.conf");
+    let services = dir.join("services");
+    let services = if services.is_dir() {
+        format!("<servicedir>{}</servicedir>", services.display())
+    } else {
+        String::new()
+    };
     std::fs::write(
         &config,
         format!(
             "<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN\" \
              \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n\
-             <busconfig><type>session</type><listen>unix:path={}</listen>\
+             <busconfig><type>session</type><listen>unix:path={}</listen>{services}\
              <policy context=\"default\"><allow send_destination=\"*\"/>\
              <allow receive_sender=\"*\"/><allow own=\"*\"/></policy></busconfig>\n",
             socket.display()
@@ -488,6 +496,15 @@ pub enum Shows {
         app_id: &'static str,
         size: (u32, u32),
     },
+    /// An xdg toplevel of this size that drags files as a file manager
+    /// does: pressed with the left button, at the first motion after, it
+    /// starts a drag offering `text/uri-list` (copied), and writes `uris`
+    /// when asked; [`Event::DragEnded`] says how it ended.
+    Dragging {
+        app_id: &'static str,
+        size: (u32, u32),
+        uris: String,
+    },
     /// An xdg toplevel of this size without xdg-decoration that asks for
     /// the server's decorations (`server`) or draws its own through KDE's
     /// server decoration protocol, as GTK 3 clients do; it says
@@ -638,6 +655,9 @@ pub enum Event {
     Resumed {
         input: bool,
     },
+    /// Its drag ended: its target finished with it (`true`), or it was
+    /// cancelled ([`Shows::Dragging`]).
+    DragEnded(bool),
     /// Its window's xdg-foreign handle.
     Exported(String),
     /// The handle it imported names nothing (any more).
@@ -748,6 +768,8 @@ fn run_client(
         pointing: false,
         acted: None,
         moving: None,
+        dragging: None,
+        drag: None,
         margin: 0,
         cell: 0,
         seat: None,
@@ -861,6 +883,16 @@ fn run_client(
             client.size = size;
             client.window = Some(window);
             client.moving = Some(None);
+        }
+        Some(Shows::Dragging { app_id, size, uris }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.dragging = Some((uris, None));
         }
         Some(Shows::Checkered { app_id, size }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -1236,6 +1268,11 @@ struct Client {
     /// Moves itself ([`Shows::Moving`]): the left press's serial, until
     /// the motion after it asks for the move.
     moving: Option<Option<u32>>,
+    /// Drags files ([`Shows::Dragging`]): what it writes, and the left
+    /// press's serial until the motion after it starts the drag.
+    dragging: Option<(String, Option<u32>)>,
+    /// Its drag's source, while it drags.
+    drag: Option<DragSource>,
     /// The shadow around the window, outside its geometry.
     margin: u32,
     /// Floating, its sizes are whole multiples of this.
@@ -1303,6 +1340,32 @@ impl Client {
         source.set_selection(device, 0);
         self.clip = Some((clip, source));
         conn.display().sync(qh, ());
+    }
+
+    /// Starts dragging its files from its window, from the press `serial`
+    /// ([`Shows::Dragging`]).
+    fn start_drag(&mut self, qh: &QueueHandle<Self>, serial: u32) {
+        let (Some(data), Some(seat), Some(window)) = (&self.data, &self.seat, &self.window) else {
+            return;
+        };
+        let device = self
+            .device
+            .get_or_insert_with(|| data.get_data_device(qh, seat));
+        let source = data.create_drag_and_drop_source(
+            qh,
+            ["text/uri-list"],
+            wl_data_device_manager::DndAction::Copy,
+        );
+        source.start_drag(device, window.wl_surface(), None, serial);
+        self.drag = Some(source);
+    }
+
+    /// Its drag from `source` ended, `finished` or cancelled.
+    fn drag_ended(&mut self, source: &wl_data_source::WlDataSource, finished: bool) {
+        if self.drag.as_ref().is_some_and(|d| d.inner() == source) {
+            self.drag = None;
+            let _ = self.events.send(Event::DragEnded(finished));
+        }
     }
 
     /// Reads the clipboard's text off its thread: [`Event::Pasted`].
@@ -1583,7 +1646,11 @@ impl SeatHandler for Client {
             return;
         }
         if capability == Capability::Pointer
-            && (self.popup_on_press || self.hiding || self.pointing || self.moving.is_some())
+            && (self.popup_on_press
+                || self.hiding
+                || self.pointing
+                || self.moving.is_some()
+                || self.dragging.is_some())
         {
             let _ = self.seats.get_pointer(qh, &seat);
             self.seat = Some(seat);
@@ -1648,6 +1715,22 @@ impl PointerHandler for Client {
                             (pressed.take(), &self.window, &self.seat)
                         {
                             window.move_(seat, serial);
+                        }
+                    }
+                    PointerEventKind::Release { .. } => *pressed = None,
+                    _ => {}
+                }
+            }
+            if let Some((_, pressed)) = &mut self.dragging {
+                match event.kind {
+                    PointerEventKind::Press {
+                        button: BTN_LEFT,
+                        serial,
+                        ..
+                    } => *pressed = Some(serial),
+                    PointerEventKind::Motion { .. } => {
+                        if let Some(serial) = pressed.take() {
+                            self.start_drag(qh, serial);
                         }
                     }
                     PointerEventKind::Release { .. } => *pressed = None,
@@ -1833,11 +1916,17 @@ impl DataSourceHandler for Client {
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &wl_data_source::WlDataSource,
+        source: &wl_data_source::WlDataSource,
         mime: String,
         mut pipe: WritePipe,
     ) {
         use std::io::Write;
+        if let (Some(drag), Some((uris, _))) = (&self.drag, &self.dragging)
+            && drag.inner() == source
+        {
+            let _ = pipe.write_all(uris.as_bytes());
+            return;
+        }
         let Some((clip, _)) = &self.clip else {
             return;
         };
@@ -1856,8 +1945,9 @@ impl DataSourceHandler for Client {
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &wl_data_source::WlDataSource,
+        source: &wl_data_source::WlDataSource,
     ) {
+        self.drag_ended(source, false);
     }
 
     fn dnd_dropped(
@@ -1872,8 +1962,9 @@ impl DataSourceHandler for Client {
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &wl_data_source::WlDataSource,
+        source: &wl_data_source::WlDataSource,
     ) {
+        self.drag_ended(source, true);
     }
 
     fn action(

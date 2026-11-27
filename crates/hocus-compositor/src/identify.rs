@@ -77,6 +77,19 @@ pub struct Badge {
     pub number: u32,
     /// "Écran du portable · 2560 × 1600".
     pub words: String,
+    /// What it says in place of its number: "1 · 2" on the screen shown
+    /// while mirrored (#931).
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+impl Badge {
+    /// What it says large.
+    fn said(&self) -> String {
+        self.label
+            .clone()
+            .unwrap_or_else(|| self.number.to_string())
+    }
 }
 
 /// The numbers while they show.
@@ -94,10 +107,10 @@ struct Faces {
     words: fontdue::Font,
 }
 
-/// A box's picture: what it was drawn for (number, words, scale in
+/// A box's picture: what it was drawn for (what it says, words, scale in
 /// thousandths), its pixels, their size, its logical size and its id.
 type Picture = (
-    (u32, String, u32),
+    (String, String, u32),
     MemoryRenderBuffer,
     (i32, i32),
     (f64, f64),
@@ -356,14 +369,13 @@ impl State {
         };
         let scale = output.current_scale().fractional_scale();
         let key = (
-            badge.number,
+            badge.said(),
             badge.words.clone(),
             (scale * 1000.0).round() as u32,
         );
         let mut pictures = self.identify.pictures.borrow_mut();
         if pictures.get(&name).is_none_or(|(k, ..)| *k != key)
-            && let Some((pixels, pw, ph, l)) =
-                draw(faces, &badge.number.to_string(), &badge.words, scale)
+            && let Some((pixels, pw, ph, l)) = draw(faces, &badge.said(), &badge.words, scale)
         {
             pictures.insert(
                 name.clone(),

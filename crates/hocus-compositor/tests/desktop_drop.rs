@@ -383,3 +383,28 @@ fn an_x11_window_moved_by_its_client_let_go_on_a_tile_goes_there() -> anyhow::Re
     assert_eq!(hp.drop_over(), None);
     Ok(())
 }
+
+/// #947, scenario 16: the screens linked (the default), a window of the
+/// first screen let go on the second row's tile 2 goes to that screen's
+/// desktop 2, and nothing switches.
+#[test]
+fn linked_a_window_let_go_on_the_other_rows_tile_goes_there_and_nothing_switches()
+-> anyhow::Result<()> {
+    let (mut hp, surface) = start()?;
+    hp.pointer_move(960.0, 540.0);
+    let window = open(&mut hp, "test.dropped", (400, 300))?;
+    drag(&mut hp, window, tile(surface, SECOND, 1))?;
+    assert_eq!(
+        hp.drop_over(),
+        Some((FIRST.to_owned(), SECOND.to_owned(), 1))
+    );
+    release(&mut hp)?;
+    let placed = hp
+        .placements()
+        .into_iter()
+        .find(|p| p.app_id.as_deref() == Some("test.dropped"))
+        .map(|p| (p.output, p.desktop, p.shown));
+    assert_eq!(placed, Some((Some(SECOND.to_owned()), 1, false)));
+    assert_eq!(shown(&hp), [0, 0]);
+    Ok(())
+}

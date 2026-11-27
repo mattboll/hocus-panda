@@ -1,0 +1,23 @@
+[package]
+name = "hocus-phone"
+description = "The Hocuspanda phone: KDE Connect's daemon followed and asked on the session bus, and KDE's job view for its transfers, for the bar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# KDE Connect on the session bus (MIT); `service`: the job view it reports
+# its transfers to.
+zbus = { workspace = true, features = ["tokio", "proxy", "service"] }
+# What its calls take.
+serde.workspace = true
+# The thread's own runtime, its channels and its timeouts.
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+# The signals' streams.
+futures-util.workspace = true
+tracing.workspace = true

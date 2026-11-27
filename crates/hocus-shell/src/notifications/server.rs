@@ -31,7 +31,7 @@ use zbus::{
 
 use super::{
     Input,
-    note::{self, IconFrom, Note, Sender, Timeout, Urgency},
+    note::{self, IconFrom, Note, PhoneNote, Sender, Timeout, Urgency},
 };
 use crate::{
     launcher::{
@@ -52,6 +52,8 @@ pub enum Signal {
     Closed { id: u32, reason: u32 },
     /// One of its actions was invoked (`default`: the card).
     Action { id: u32, key: String },
+    /// Answered in place (KNotifications' inline reply, #957).
+    Replied { id: u32, text: String },
 }
 
 /// Where the signals go: the server's thread.
@@ -156,9 +158,21 @@ async fn run(bus: String, mut signals: UnboundedReceiver<Signal>) {
                     )
                     .await
             }
+            Signal::Replied { id, text } => {
+                tracing::debug!(id, "a notification answered in place");
+                connection
+                    .emit_signal(
+                        None::<BusName<'_>>,
+                        PATH,
+                        NAME,
+                        "NotificationReplied",
+                        &(*id, text.as_str()),
+                    )
+                    .await
+            }
         };
         if let Err(err) = sent {
-            tracing::warn!(%err, ?signal, "a notification's signal not sent");
+            tracing::warn!(%err, "a notification's signal not sent");
         }
     }
 }
@@ -201,7 +215,7 @@ impl Server {
             .and_then(|v| String::try_from(&**v).ok())
             .map(|e| e.trim_end_matches(".desktop").to_owned())
             .filter(|e| !e.is_empty());
-        let (buttons, default) = note::actions(&actions);
+        let (mut buttons, default) = note::actions(&actions);
         let body = note::plain(&body);
         let image = hints
             .get("image-data")
@@ -305,6 +319,13 @@ impl Server {
                 .or_else(|| number(v).map(|n| n != 0))
                 .unwrap_or(false)
         });
+        // A phone's, relayed by KDE Connect (#957): that application's on
+        // that device; its `inline-reply` a field, not a button.
+        let phone = phone_of(&text, &mut buttons);
+        let (app_name, entry) = match &phone {
+            Some(phone) => (phone.named(), Some(phone.app_id())),
+            None => (app_name, entry),
+        };
         let note = Note {
             id,
             app: app_name,
@@ -327,6 +348,7 @@ impl Server {
             transient,
             ancestry,
             number: 0,
+            phone,
         };
         // Counted for the Settings' list (#899), whatever its level.
         super::apps::counted(note.app_id(), note.app.clone(), named);
@@ -339,6 +361,16 @@ impl Server {
             transient,
             "a notification"
         );
+        if let Some(phone) = &note.phone {
+            super::phone_served(
+                id,
+                super::PhoneKept {
+                    phone: phone.clone(),
+                    title: note.summary.clone(),
+                    text: note.body.clone(),
+                },
+            );
+        }
         super::input(Input::Notify(Box::new(note)));
         id
     }
@@ -355,6 +387,11 @@ impl Server {
             "persistence",
             "icon-static",
             "sound",
+            // KDE Connect's phone's applications and devices, and their
+            // replies in place (#957).
+            "x-kde-display-appname",
+            "x-kde-origin-name",
+            "inline-reply",
         ]
         .map(str::to_owned)
         .into()
@@ -369,6 +406,22 @@ impl Server {
             "1.2".to_owned(),
         )
     }
+}
+
+/// A phone's notification's own (#957), from its hints read by `text`:
+/// its device (`x-kdeconnect-source-device`, else `x-kde-origin-name`)
+/// and its application there (`x-kde-display-appname`); its
+/// `inline-reply` action taken out of `buttons`, its placeholder kept.
+fn phone_of(
+    text: &dyn Fn(&str) -> Option<String>,
+    buttons: &mut Vec<(String, String)>,
+) -> Option<PhoneNote> {
+    let device = text("x-kdeconnect-source-device").or_else(|| text("x-kde-origin-name"))?;
+    let app = text("x-kde-display-appname")?;
+    let replies = buttons.iter().any(|(key, _)| key == "inline-reply");
+    buttons.retain(|(key, _)| key != "inline-reply");
+    let reply = replies.then(|| text("x-kde-reply-placeholder-text").unwrap_or_default());
+    Some(PhoneNote { device, app, reply })
 }
 
 /// The process of the bus's connection `sender` (0: not known).

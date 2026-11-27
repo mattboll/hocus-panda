@@ -738,7 +738,10 @@ impl State {
     ) -> Option<Result<Value, String>> {
         Some(Ok(match call {
             Call::ListWindows(_) => json!({ "windows": self.mcp_windows() }),
-            Call::ListDesktops(_) => json!({ "screens": self.mcp_desktops() }),
+            Call::ListDesktops(_) => json!({
+                "screens": self.mcp_desktops(),
+                "linked": self.desktops_linked(),
+            }),
             Call::ListOutputs(_) => json!({ "outputs": self.mcp_outputs() }),
             Call::Journal(asked) => {
                 let limit = asked.limit.unwrap_or(50).clamp(1, JOURNAL as u32) as usize;
@@ -873,8 +876,9 @@ impl State {
             .collect()
     }
 
-    fn mcp_outputs(&self) -> Vec<Value> {
-        self.space
+    pub(crate) fn mcp_outputs(&self) -> Vec<Value> {
+        let mut outputs: Vec<Value> = self
+            .space
             .outputs()
             .map(|output| {
                 json!({
@@ -884,7 +888,15 @@ impl State {
                     "scale": output.current_scale().fractional_scale(),
                 })
             })
-            .collect()
+            .collect();
+        // A mirror (#931): no place nor size of its own, the screen whose
+        // picture it shows.
+        for output in &self.displays.outputs {
+            if let Some(shown) = self.mirror_source(output) {
+                outputs.push(json!({ "name": output.name(), "mirror_of": shown.name() }));
+            }
+        }
+        outputs
     }
 
     /// Whether an action can be done as asked: the window there, the
@@ -994,12 +1006,21 @@ impl State {
     /// The screen `name` names, else the focused window's, else the first.
     fn mcp_output(&self, name: Option<&str>) -> Result<Output, String> {
         match name {
-            Some(name) => self
-                .space
-                .outputs()
-                .find(|o| o.name() == name)
-                .cloned()
-                .ok_or_else(|| format!("no screen {name:?}: list_outputs says which there are")),
+            Some(name) => {
+                if let Some(mirror) = self.mirror_named(name)
+                    && let Some(shown) = self.mirror_source(mirror)
+                {
+                    return Err(format!(
+                        "screen {name:?} shows another screen's picture ({}): use that one",
+                        shown.name()
+                    ));
+                }
+                self.space
+                    .outputs()
+                    .find(|o| o.name() == name)
+                    .cloned()
+                    .ok_or_else(|| format!("no screen {name:?}: list_outputs says which there are"))
+            }
             None => self
                 .model
                 .focused()
@@ -1445,19 +1466,30 @@ impl State {
         let to = self.mcp_desktop_on(&output, c.desktop)?;
         self.mcp_request(agent, intent, McpKind::Desktop);
         let name = output.name();
-        let current = self.strip(&output).current();
+        // Linked (#947), every screen switches, whatever `output` names.
+        let screens = self.switching_with(&output);
+        let before: Vec<(String, usize)> = screens
+            .iter()
+            .map(|o| (o.name(), self.strip(o).current()))
+            .collect();
         if let Some(request) = self.mcp.open.get_mut(agent) {
-            request
-                .before
-                .desktops
-                .entry(name.clone())
-                .or_insert(current);
+            for (screen, current) in &before {
+                request
+                    .before
+                    .desktops
+                    .entry(screen.clone())
+                    .or_insert(*current);
+            }
             request.desktop = Some(c.desktop);
             request.summary.switched = Some(c.desktop);
         }
         self.switch_desktop(&output, to, None);
+        let switched: Vec<Value> = screens
+            .iter()
+            .map(|o| json!({ "output": o.name(), "desktop": self.strip(o).current() + 1 }))
+            .collect();
         Ok((
-            json!({ "output": name, "desktop": c.desktop }),
+            json!({ "output": name, "desktop": c.desktop, "screens": switched }),
             format!("desktop {} of {name}", c.desktop),
         ))
     }

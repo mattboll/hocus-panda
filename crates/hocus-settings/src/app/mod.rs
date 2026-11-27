@@ -247,6 +247,8 @@ enum Undo {
     Network(network::Choice),
     /// The power mode (power-profiles-daemon's, 6.10).
     Power(power_page::ModeChoice),
+    /// Mirroring, the compositor's (#931).
+    Mirror(screens::MirrorChoice),
     /// A tool plugged in or out, herdr followed or not (6.16).
     Agents(agents_page::Choice),
     /// A default application or a start-up one (mimeapps.list, autostart,
@@ -1493,6 +1495,13 @@ impl App {
                 self.toast = None;
                 return self.power_undo(choice, false);
             }
+            Some(Undo::Mirror(_)) => {
+                let Some(Undo::Mirror(choice)) = self.undo.pop() else {
+                    return Task::none();
+                };
+                self.toast = None;
+                return self.mirror_undo(choice, false);
+            }
             Some(Undo::Agents(_)) => {
                 let Some(Undo::Agents(choice)) = self.undo.pop() else {
                     return Task::none();
@@ -1595,6 +1604,12 @@ impl App {
                     return Task::none();
                 };
                 return self.power_undo(choice, true);
+            }
+            Some(Undo::Mirror(_)) => {
+                let Some(Undo::Mirror(choice)) = self.redo.pop() else {
+                    return Task::none();
+                };
+                return self.mirror_undo(choice, true);
             }
             Some(Undo::Agents(_)) => {
                 let Some(Undo::Agents(choice)) = self.redo.pop() else {

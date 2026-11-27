@@ -36,6 +36,9 @@ const ASK: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Chosen {
     Path(PathBuf),
+    /// Files to open, several at once (a phone's "Envoyer un fichier…",
+    /// #957).
+    Paths(Vec<PathBuf>),
     Cancelled,
     /// No portal answers, or none chooses files: save beside instead.
     NoPortal,
@@ -46,8 +49,17 @@ pub enum Chosen {
 /// §2.1), over the surface of `parent`'s namespace.
 #[derive(Debug, Clone, Copy)]
 enum Pick<'a> {
-    Save { name: &'a str, folder: &'a Path },
-    Folder { parent: &'static str },
+    Save {
+        name: &'a str,
+        folder: &'a Path,
+    },
+    Folder {
+        parent: &'static str,
+    },
+    /// Files to open, several if the user likes.
+    Files {
+        parent: &'static str,
+    },
 }
 
 /// The user chooses where to save `name`, from `folder`, in a dialog
@@ -55,6 +67,13 @@ enum Pick<'a> {
 /// thread until they do.
 pub fn save_file(title: &str, name: &str, folder: &Path, showing: impl FnOnce()) -> Chosen {
     run(title, Pick::Save { name, folder }, showing)
+}
+
+/// The user chooses files to open in a dialog titled `title`, over the
+/// shell's surface of `parent`'s namespace. Blocks this thread until they
+/// do.
+pub fn open_files(title: &str, parent: &'static str) -> Chosen {
+    run(title, Pick::Files { parent }, || {})
 }
 
 /// The user chooses a folder in a dialog titled `title`, over the shell's
@@ -97,7 +116,7 @@ async fn choose(bus: &str, title: &str, pick: Pick<'_>, showing: impl FnOnce()) 
         }
         let namespace = match pick {
             Pick::Save { .. } => hocus_link::CAPTURE_EDITOR_NAMESPACE,
-            Pick::Folder { parent } => parent,
+            Pick::Folder { parent } | Pick::Files { parent } => parent,
         };
         let parent = crate::foreign::parent_window(namespace).await;
         let request = ask(&connection, &parent, title, pick).await?;
@@ -128,10 +147,19 @@ async fn choose(bus: &str, title: &str, pick: Pick<'_>, showing: impl FnOnce()) 
     let read: zbus::Result<(u32, HashMap<String, OwnedVariant>)> = message.body().deserialize();
     match read {
         Ok((0, results)) => {
-            let uri = results
+            let uris = results
                 .get("uris")
                 .and_then(|v| <Vec<String>>::try_from(v.clone()).ok())
-                .and_then(|uris| uris.into_iter().next());
+                .unwrap_or_default();
+            if matches!(pick, Pick::Files { .. }) {
+                let paths: Vec<PathBuf> = uris.iter().filter_map(|u| path_of(u)).collect();
+                if paths.is_empty() {
+                    tracing::info!("the file chooser chose no file");
+                    return Chosen::Cancelled;
+                }
+                return Chosen::Paths(paths);
+            }
+            let uri = uris.into_iter().next();
             match uri.as_deref().and_then(path_of) {
                 Some(path) => Chosen::Path(path),
                 None => {
@@ -203,6 +231,10 @@ async fn ask(
         }
         Pick::Folder { .. } => {
             options.insert("directory", Variant::from(true));
+            "OpenFile"
+        }
+        Pick::Files { .. } => {
+            options.insert("multiple", Variant::from(true));
             "OpenFile"
         }
     };

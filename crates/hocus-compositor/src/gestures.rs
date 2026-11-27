@@ -4,7 +4,9 @@
 //! By default three fingers across move the desktops (windows.md §12),
 //! four fingers up open the launcher and down close it (launcher.md);
 //! four fingers down with no launcher open open the overview, or close it
-//! (8.5 A, windows.md §12b). A swipe no action takes is the application's
+//! (8.5 A, windows.md §12b); three fingers down every desktop at once, and,
+//! while it shows, three fingers up close it, whatever they are bound to
+//! (#944, windows.md §12c). A swipe no action takes is the application's
 //! under the pointer (`zwp_pointer_gestures_v1`).
 //!
 //! The fingers' first travel decides ([`Hold::Deciding`]): until they have
@@ -65,8 +67,8 @@ pub enum Hold {
     Desktops,
     /// The launcher's swipe, or the way back with it open: it follows.
     Launcher(LauncherSwipe),
-    /// The overview's swipe opened or closed it: the rest of the swipe is
-    /// the desktop's, doing nothing.
+    /// The overview's swipe opened or closed it, or every desktop's: the
+    /// rest of the swipe is the desktop's, doing nothing.
     Overview,
     /// Another action's: it runs as the fingers lift, if they went
     /// [`RELEASE_TRAVEL`] its way (`travel`, so far).
@@ -155,7 +157,9 @@ impl State {
     pub(crate) fn take_swipe(&mut self, gesture: Gesture, grabbed: bool) -> bool {
         match (std::mem::take(&mut self.gestures.hold), gesture) {
             (Hold::Free, Gesture::SwipeBegin { time, fingers }) => {
-                let ours = !grabbed && self.config.swipes_of(fingers);
+                // Every desktop showing: three fingers up close it.
+                let closes = fingers == 3 && self.all_desktops_open();
+                let ours = !grabbed && (closes || self.config.swipes_of(fingers));
                 if ours {
                     self.gestures.hold = Hold::Deciding {
                         fingers,
@@ -291,6 +295,15 @@ impl State {
                 .map(|fingers| Trigger::Swipe { fingers, toward })
         };
         let open = self.panel.launchers.open();
+        // Every desktop showing: three fingers up close it, built in as
+        // four fingers down close the launcher, whatever they are bound to
+        // (#944).
+        if fingers == 3 && toward == Toward::Up && self.all_desktops_open() {
+            tracing::debug!("three fingers up: every desktop closes");
+            self.close_overview(None);
+            self.gestures.hold = Hold::Overview;
+            return;
+        }
         // The launcher open: the way back from its own swipe closes it,
         // following.
         if open
@@ -326,6 +339,13 @@ impl State {
                 self.gestures.hold = Hold::Overview;
                 return;
             }
+            // From the desktop or the overview; showing already, nothing.
+            Some(Action::AllDesktops) if !open => {
+                tracing::debug!(fingers, ?toward, "a swipe: every desktop");
+                self.open_all_desktops();
+                self.gestures.hold = Hold::Overview;
+                return;
+            }
             Some(Action::Launcher) if !open && self.shell_linked() => {
                 let mut swipe = LauncherSwipe::new(toward, true, self.reduced_motion());
                 swipe.update(along((dx, dy), toward), time);
@@ -336,7 +356,7 @@ impl State {
                 tracing::debug!(fingers, ?toward, "fingers hold the launcher");
                 return;
             }
-            Some(Action::Overview | Action::Launcher) | None => {}
+            Some(Action::Overview | Action::AllDesktops | Action::Launcher) | None => {}
             Some(action) => {
                 self.gestures.hold = Hold::Released {
                     action,

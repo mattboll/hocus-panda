@@ -172,6 +172,10 @@ pub struct Lens<C> {
     /// The zoom and view of the last frame: another redraws everything.
     last: Option<(u64, u64, u64)>,
     id: Id,
+    /// Mirroring (#931): the screen whose picture this is, and the black
+    /// bands' ids, kept so that they are drawn once.
+    source: Option<String>,
+    bands: [Id; 2],
 }
 
 impl<C> Default for Lens<C> {
@@ -184,6 +188,8 @@ impl<C> Default for Lens<C> {
             bag: DamageBag::new(4),
             last: None,
             id: Id::new(),
+            source: None,
+            bands: [Id::new(), Id::new()],
         }
     }
 }
@@ -238,13 +244,15 @@ impl<T> Element for ZoomElement<T> {
         scale: Scale<f64>,
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
-        self.damage
-            .damage_since(commit)
-            .unwrap_or_else(|| DamageSet::from_slice(&[self.geometry(scale)]))
+        // Damage and opaque regions are the element's own, from its
+        // corner: a mirror's picture is not at the screen's (#931).
+        self.damage.damage_since(commit).unwrap_or_else(|| {
+            DamageSet::from_slice(&[Rectangle::from_size(self.geometry(scale).size)])
+        })
     }
 
     fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
-        OpaqueRegions::from_slice(&[self.geometry])
+        OpaqueRegions::from_slice(&[Rectangle::from_size(self.geometry.size)])
     }
 
     fn kind(&self) -> Kind {
@@ -316,6 +324,17 @@ where
         + crate::glass::Glass,
     R::TextureId: Send + Clone + Texture + 'static,
 {
+    // A mirror (#931) shows another screen's picture, fitted.
+    if let Some(shown) = state.mirror_source(output) {
+        match mirrored(renderer, state, output, &shown, cursor, lens) {
+            Ok(screen) => return screen,
+            Err(err) => {
+                tracing::warn!(output = output.name(), "could not mirror: {err:#}");
+                lens.rest();
+                return Screen::plain(Vec::new());
+            }
+        }
+    }
     let now = state.now();
     let Some((zoom, view)) = state.magnified(output, now) else {
         lens.rest();
@@ -362,7 +381,7 @@ where
     let size = output.current_transform().transform_size(mode.size);
     let scale = output.current_scale().fractional_scale();
     let key = (size, (scale * 1000.0).round() as u32);
-    if lens.key != Some(key) || lens.canvas.is_none() {
+    if lens.key != Some(key) || lens.canvas.is_none() || lens.source.is_some() {
         *lens = Lens::default();
         lens.canvas = Some(
             renderer
@@ -454,6 +473,157 @@ where
         elements,
         states: Some(states),
         hard,
+    })
+}
+
+/// What mirror `output` shows (#931): `shown`'s picture, drawn into a
+/// picture of its size kept between frames (only what changed is drawn
+/// again), then fitted on the mirror, its proportions kept, black bands
+/// around it; the pointer where it is on `shown`, at the fitted scale.
+fn mirrored<R>(
+    renderer: &mut R,
+    state: &State,
+    output: &Output,
+    shown: &Output,
+    cursor: bool,
+    lens: &mut Lens<R::Canvas>,
+) -> anyhow::Result<Screen<R>>
+where
+    R: Magnify
+        + ImportAll
+        + ImportMem
+        + crate::wobble::Bend
+        + crate::going::Shaders
+        + crate::glass::Glass,
+    R::TextureId: Send + Clone + Texture + 'static,
+{
+    use smithay::backend::renderer::element::solid::SolidColorRenderElement;
+
+    let mode = shown
+        .current_mode()
+        .context("a shown screen without a mode")?;
+    let size = shown.current_transform().transform_size(mode.size);
+    let scale = shown.current_scale().fractional_scale();
+    let target = output
+        .current_mode()
+        .context("a mirror without a mode")?
+        .size;
+    let target = output.current_transform().transform_size(target);
+    let key = (size, (scale * 1000.0).round() as u32);
+    let source = shown.name();
+    if lens.key != Some(key) || lens.canvas.is_none() || lens.source.as_ref() != Some(&source) {
+        *lens = Lens::default();
+        lens.canvas = Some(
+            renderer
+                .canvas(size)
+                .map_err(|err| anyhow::anyhow!("{err:?}"))
+                .context("no picture for the mirror")?,
+        );
+        lens.tracker = Some(OutputDamageTracker::new(size, scale, Transform::Normal));
+        lens.key = Some(key);
+        lens.source = Some(source);
+    }
+    let inner = state.elements_for(renderer, shown, Purpose::Screen { cursor: false });
+    let Lens {
+        canvas: Some(canvas),
+        tracker: Some(tracker),
+        drawn,
+        bag,
+        last,
+        id,
+        bands,
+        ..
+    } = lens
+    else {
+        anyhow::bail!("no picture");
+    };
+    let damage = {
+        let mut into = renderer
+            .bind_canvas(canvas)
+            .map_err(|err| anyhow::anyhow!("{err:?}"))
+            .context("could not draw into the picture")?;
+        // The picture keeps its pixels: an age of 1 draws what changed.
+        let age = usize::from(*drawn);
+        let result = tracker
+            .render_output(renderer, &mut into, age, &inner, BACKGROUND)
+            .map_err(|err| anyhow::anyhow!("{err:?}"))
+            .context("could not draw the shown screen's picture")?;
+        result.damage.cloned()
+    };
+    *drawn = true;
+    let (factor, fitted) = crate::mirror::fit(size, target);
+    // The picture's damage, from its own corner.
+    let whole = Rectangle::<i32, Physical>::from_size(fitted.size);
+    let now_seen = (
+        factor.to_bits(),
+        u64::from(fitted.loc.x.unsigned_abs()),
+        u64::from(fitted.loc.y.unsigned_abs()),
+    );
+    if *last != Some(now_seen) {
+        bag.add([whole]);
+        *last = Some(now_seen);
+    } else if let Some(damage) = damage {
+        // Scaled onto the mirror, a pixel more around for the filter.
+        let seen: Vec<_> = damage
+            .iter()
+            .filter_map(|r| {
+                let at = |v: i32| f64::from(v) * factor;
+                let x0 = (at(r.loc.x) - 1.0).floor() as i32;
+                let y0 = (at(r.loc.y) - 1.0).floor() as i32;
+                let x1 = (at(r.loc.x + r.size.w) + 1.0).ceil() as i32;
+                let y1 = (at(r.loc.y + r.size.h) + 1.0).ceil() as i32;
+                Rectangle::from_extremities((x0, y0), (x1, y1)).intersection(whole)
+            })
+            .collect();
+        if !seen.is_empty() {
+            bag.add(seen);
+        }
+    }
+    let picture = ZoomElement {
+        id: id.clone(),
+        damage: bag.snapshot(),
+        texture: R::canvas_texture(canvas),
+        src: Rectangle::from_size((f64::from(size.w), f64::from(size.h)).into()),
+        geometry: fitted,
+    };
+    let mut elements: Vec<OutputElement<R>> = Vec::new();
+    if cursor && let Some(area) = state.space.output_geometry(shown) {
+        // The view's corner, so that the shown screen's corner lands on
+        // the picture's.
+        let k = scale * factor;
+        let corner = area.loc.to_f64()
+            - Point::from((f64::from(fitted.loc.x) / k, f64::from(fitted.loc.y) / k));
+        let view = Rectangle::new(corner, area.size.to_f64());
+        elements.extend(state.magnified_cursor_elements(renderer, view, scale, factor));
+    }
+    elements.push(OutputElements::Zoom(picture));
+    // The bands either side (left and right, or above and below).
+    let bands_at = if fitted.size.w < target.w {
+        [
+            Rectangle::new((0, 0).into(), (fitted.loc.x, target.h).into()),
+            Rectangle::from_extremities((fitted.loc.x + fitted.size.w, 0), (target.w, target.h)),
+        ]
+    } else {
+        [
+            Rectangle::new((0, 0).into(), (target.w, fitted.loc.y).into()),
+            Rectangle::from_extremities((0, fitted.loc.y + fitted.size.h), (target.w, target.h)),
+        ]
+    };
+    for (band, id) in bands_at.into_iter().zip(bands.iter()) {
+        if band.size.w > 0 && band.size.h > 0 {
+            elements.push(OutputElements::Solid(SolidColorRenderElement::new(
+                id.clone(),
+                band,
+                0,
+                [0.0, 0.0, 0.0, 1.0],
+                Kind::Unspecified,
+            )));
+        }
+    }
+    Ok(Screen {
+        elements,
+        states: None,
+        hard: false,
     })
 }
 

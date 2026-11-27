@@ -137,6 +137,7 @@ pub fn key_shown(key: &str, lang: Lang) -> String {
         "xf86audiomute" => Some(words::MUTE.get(lang)),
         "xf86monbrightnessup" => Some(words::BRIGHTNESS.get(lang)),
         "xf86monbrightnessdown" => Some(words::BRIGHTNESS_2.get(lang)),
+        "xf86display" => Some(words::DISPLAY_KEY.get(lang)),
         _ => None,
     };
     match named {

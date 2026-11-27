@@ -43,6 +43,8 @@ pub const DRAW: RowGroup = RowGroup {
 
 pub const COUNT: &str = "desktops.count";
 pub const NAMES: &str = "desktops.names";
+/// Every screen switches its desktop together, or each alone (#947).
+pub const PER_SCREEN: &str = "desktops.per-screen";
 /// A project's browsers' tabs remembered (docs/design/projects.md §13 F).
 pub const REMEMBER_TABS: &str = "desktops.remember-tabs";
 pub const MOVE_KEY: &str = "windows.move-modifier";
@@ -389,6 +391,35 @@ pub fn settings() -> &'static [Setting] {
                 ),
             ),
             setting(
+                PER_SCREEN,
+                DESKTOPS,
+                words::SWITCH_DESKTOP,
+                words::SUPER_1_PUTS_EVERY_SCREEN_ON_ITS,
+                (
+                    &[
+                        "ensemble",
+                        "lier",
+                        "liés",
+                        "tous les écrans",
+                        "plusieurs écrans",
+                        "multi-écran",
+                        "synchroniser",
+                    ],
+                    &["together", "linked", "all screens", "span", "multi-monitor"],
+                ),
+                Kind::Segmented(vec![
+                    Choice {
+                        label: words::EVERY_SCREEN,
+                        value: Value::Bool(false),
+                    },
+                    Choice {
+                        label: words::EACH_SCREEN,
+                        value: Value::Bool(true),
+                    },
+                ]),
+                switch(&["desktops", "per-screen"]),
+            ),
+            setting(
                 NAMES,
                 DESKTOPS,
                 words::THEIR_NAMES,
@@ -650,6 +681,7 @@ mod tests {
             keys,
             [
                 "desktops.count",
+                "desktops.per-screen",
                 "desktops.names",
                 "desktops.remember-tabs",
                 "windows.move-modifier",

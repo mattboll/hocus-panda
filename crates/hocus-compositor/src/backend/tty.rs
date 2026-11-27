@@ -851,6 +851,7 @@ impl TtyBackend {
                 .insert_if_missing(|| crate::panel::ScreenModel(model));
         }
         let global = output.create_global::<State>(&state.display_handle);
+        crate::mirror::keep_global(&output, global.clone());
         // To the right of the screens already lit, until the settings
         // arrange them (several-screens slice).
         let x = state

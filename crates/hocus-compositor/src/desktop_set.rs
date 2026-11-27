@@ -24,7 +24,7 @@
 use hocus_link::ToShell;
 use smithay::output::Output;
 
-use crate::{desktops::MAX_COUNT, model::WindowId};
+use crate::{config::Switching, desktops::MAX_COUNT, model::WindowId};
 
 /// Windows on each desktop, every screen's together, as the Settings were
 /// last told.
@@ -57,6 +57,21 @@ impl crate::State {
         if new.names != self.config.desktops.names {
             self.config.desktops.names = new.names.clone();
             self.desktop_names_changed();
+            changed = true;
+        }
+        if new.switching != self.config.desktops.switching {
+            tracing::info!(switching = ?new.switching, "how the screens switch their desktops");
+            self.config.desktops.switching = new.switching;
+            match new.switching {
+                Switching::Together => {
+                    self.projects_linked();
+                    self.desktops_link_on();
+                }
+                // Nothing moves: each screen switches alone from now.
+                Switching::PerScreen => self.projects_unlinked(),
+            }
+            // A closed project's windows grouped by screen, or not.
+            self.tell_projects();
             changed = true;
         }
         changed

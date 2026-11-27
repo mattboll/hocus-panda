@@ -70,6 +70,7 @@ mod notifications;
 mod outputs;
 mod pandas;
 mod paste;
+mod phone;
 mod pointer;
 mod popover;
 mod project;
@@ -176,6 +177,7 @@ fn main() -> ExitCode {
     network::start();
     bluetooth::start();
     removable::start();
+    phone::start();
     launcher::start();
     emoji::start();
     actions::start();
@@ -853,6 +855,14 @@ impl Shell {
                 desktops::set_drop(bar, over);
                 Task::none()
             }
+            ToShell::FileDrag { bar, at } => {
+                phone::drag::over(bar, at);
+                Task::none()
+            }
+            ToShell::FileDropped { bar } => {
+                phone::drag::dropped(&bar);
+                Task::none()
+            }
             ToShell::BarWindows(shown) => {
                 windows::set_shown(shown);
                 Task::none()
@@ -909,6 +919,14 @@ impl Shell {
             }
             ToShell::ScreensMoved(moved) => {
                 agents::peek::screens(moved);
+                Task::none()
+            }
+            ToShell::ScreensNew(new) => {
+                agents::peek::screens_new(new);
+                Task::none()
+            }
+            ToShell::Mirror(shown) => {
+                in_use::set_mirror(shown);
                 Task::none()
             }
             ToShell::AgentPandas(pandas) => {
@@ -1751,6 +1769,16 @@ fn levels_alone() -> impl iced::futures::Stream<Item = Message> {
             }
             !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected())
         });
+        let mut out = output.clone();
+        phone::on_change(move |change| {
+            for key in phone::keys() {
+                popover::changed(popover::Item::Phone(key));
+            }
+            if change.shown {
+                network::draw::rows_changed();
+            }
+            !matches!(out.try_send(Message::Levels), Err(e) if e.is_disconnected())
+        });
         drop(output);
         std::future::pending::<()>().await;
     })
@@ -1873,6 +1901,23 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
             let wake = ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned());
             waker.unbounded_send(wake.line()).is_ok()
         });
+        // A phone paired or forgotten comes or goes as a row; its battery,
+        // its reach or a transfer draws that surface alone, and its
+        // popover when it shows (#957).
+        let waker = sender.clone();
+        phone::on_change(move |change| {
+            for key in phone::keys() {
+                popover::changed(popover::Item::Phone(key));
+            }
+            if change.shown {
+                network::draw::rows_changed();
+            }
+            if !change.row {
+                return true;
+            }
+            let wake = ToCompositor::Wake(CONNECTIONS_NAMESPACE.to_owned());
+            waker.unbounded_send(wake.line()).is_ok()
+        });
         let _ = output.send(Message::Linked(sender)).await;
         tokio::spawn(async move {
             while let Some(line) = outgoing.next().await {
@@ -1969,6 +2014,16 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                             desktops::set_drop(bar, over);
                             continue;
                         }
+                        // A drag of files over the connections (#957): only
+                        // they draw, a phone's row lit.
+                        ToShell::FileDrag { bar, at } => {
+                            phone::drag::over(bar, at);
+                            continue;
+                        }
+                        ToShell::FileDropped { bar } => {
+                            phone::drag::dropped(&bar);
+                            continue;
+                        }
                         ToShell::BarWindows(shown) => {
                             windows::set_shown(shown);
                             continue;
@@ -2034,6 +2089,15 @@ fn link(socket: &String) -> impl iced::futures::Stream<Item = Message> + use<> {
                         }
                         ToShell::ScreensMoved(moved) => {
                             agents::peek::screens(moved);
+                            continue;
+                        }
+                        ToShell::ScreensNew(new) => {
+                            agents::peek::screens_new(new);
+                            continue;
+                        }
+                        // Mirroring (#931): the in-use sign alone.
+                        ToShell::Mirror(shown) => {
+                            in_use::set_mirror(shown);
                             continue;
                         }
                         // The rows' pandas or dots (6.16): their group

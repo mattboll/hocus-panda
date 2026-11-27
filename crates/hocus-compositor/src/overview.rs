@@ -22,6 +22,8 @@
 //! draws but what clients commit: the sleeping pandas take two breaths as
 //! it opens, then lie still; only a waiting agent's panda waves on.
 
+pub mod grid;
+
 use hocus_words::compositor::overview as txt;
 use std::{collections::HashMap, time::Duration};
 
@@ -437,27 +439,42 @@ pub struct Overview {
     /// shows (`Tab` past the windows, docs/design/projects.md §2.1).
     pub button: Option<String>,
     pub reduced: bool,
+    /// Every desktop at once, a level past the overview (#944): its
+    /// grid, while it shows.
+    pub grid: Option<grid::Grid>,
 }
 
 impl Overview {
     /// How far it is open at `now`, 0 to 1: the windows' way from their
     /// places to the layout, or the fade with reduced motion.
     pub fn shown(&self, now: Duration) -> f64 {
-        let (duration, curve) = if self.reduced {
-            (FADE, Bezier::LINEAR)
+        let curve = if self.reduced {
+            Bezier::LINEAR
+        } else if self.grid.is_some() {
+            grid::ZOOM_CURVE
         } else {
-            (GLIDE, GLIDE_CURVE)
+            GLIDE_CURVE
         };
-        let open = Tween::new(self.opened, duration, curve).at(now).min(1.0);
+        let duration = self.way();
+        // Every desktop zooms out from when it was asked.
+        let opened = self.grid.as_ref().map_or(self.opened, |g| g.since);
+        let open = Tween::new(opened, duration, curve).at(now).min(1.0);
         match self.closing {
             Some(since) => (open * (1.0 - Tween::new(since, duration, curve).at(now))).max(0.0),
             None => open,
         }
     }
 
-    /// The duration of its way in or out.
+    /// The duration of its way in or out: every desktop's zoom, the
+    /// overview's glide, or the fade with reduced motion.
     pub fn way(&self) -> Duration {
-        if self.reduced { FADE } else { GLIDE }
+        if self.reduced {
+            FADE
+        } else if self.grid.is_some() {
+            grid::ZOOM
+        } else {
+            GLIDE
+        }
     }
 
     pub fn open(&self) -> bool {
@@ -468,7 +485,12 @@ impl Overview {
 /// A key while the overview is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
+    /// `Super+W`.
     Close,
+    /// `Esc`.
+    Escape,
+    /// `Super+Shift+W`: every desktop (#944).
+    AllDesktops,
     Step(i32, i32),
     /// `Tab` (forward) or `Shift+Tab`: as the arrows across, and past the
     /// windows the shown desktop's button.
@@ -488,12 +510,13 @@ impl Key {
         use crate::Action;
         match action {
             Some(Action::Overview) => return Self::Close,
+            Some(Action::AllDesktops) => return Self::AllDesktops,
             Some(Action::Desktop(n)) => return Self::Show(n),
             Some(Action::SendToDesktop(n)) => return Self::Send(n),
             _ => {}
         }
         match sym {
-            Keysym::Escape => Self::Close,
+            Keysym::Escape => Self::Escape,
             Keysym::Left => Self::Step(-1, 0),
             Keysym::Right => Self::Step(1, 0),
             Keysym::Up => Self::Step(0, -1),
@@ -517,7 +540,7 @@ pub struct Screen {
     pub area: Area,
 }
 
-fn area_of(r: crate::model::Rect) -> Area {
+pub(crate) fn area_of(r: crate::model::Rect) -> Area {
     Area {
         x: f64::from(r.x),
         y: f64::from(r.y),
@@ -544,11 +567,17 @@ impl State {
 
     /// Opens the overview on every screen.
     pub fn open_overview(&mut self) {
+        self.open_overview_as(None);
+    }
+
+    /// Opens the overview on every screen, or every desktop with `grid`:
+    /// whether it opened.
+    fn open_overview_as(&mut self, grid: Option<grid::Grid>) -> bool {
         if self.locked() || self.overview_open() || self.space.outputs().next().is_none() {
-            return;
+            return false;
         }
         if self.seat.get_pointer().is_some_and(|p| p.is_grabbed()) {
-            return;
+            return false;
         }
         self.end_switcher(false);
         self.close_radial(None);
@@ -559,6 +588,7 @@ impl State {
         let opened = match self
             .overview
             .as_ref()
+            .filter(|o| o.grid.is_none() && grid.is_none())
             .and_then(|o| o.closing.map(|c| (o, c)))
         {
             Some((o, since)) => {
@@ -575,7 +605,9 @@ impl State {
             .focused()
             .filter(|id| self.model.is_shown(*id))
             .or_else(|| self.overview_slots_all().first().map(|(id, _)| *id));
-        tracing::info!(windows = self.windows.len(), "the overview opens");
+        if grid.is_none() {
+            tracing::info!(windows = self.windows.len(), "the overview opens");
+        }
         self.overview = Some(Overview {
             opened,
             closing: None,
@@ -589,9 +621,11 @@ impl State {
             agents,
             button: None,
             reduced,
+            grid,
         });
         self.overview_pointer_off();
         self.redraw = true;
+        true
     }
 
     /// No client sees the pointer while the overview has it.
@@ -630,6 +664,9 @@ impl State {
         overview.press = None;
         overview.drag = None;
         overview.hover = None;
+        if let Some(grid) = &mut overview.grid {
+            grid.let_go();
+        }
         tracing::info!(focus = focus.map(|f| f.0), "the overview closes");
         // A project's form or card goes with it.
         self.tell_shell(hocus_link::ToShell::ProjectEnd);
@@ -668,6 +705,7 @@ impl State {
 
     /// A window went.
     pub fn overview_window_gone(&mut self, id: WindowId) {
+        self.grid_window_gone(id);
         let Some(overview) = &mut self.overview else {
             return;
         };
@@ -902,8 +940,13 @@ impl State {
         let Some(overview) = self.overview.as_ref().filter(|o| o.open()) else {
             return false;
         };
+        let grid_holds = overview
+            .grid
+            .as_ref()
+            .is_some_and(|g| g.press.is_some() || g.carry.is_some());
         overview.press.is_some()
             || overview.drag.is_some()
+            || grid_holds
             || self
                 .layer_surface_under(at, crate::handlers::layer_shell::Stand::Above)
                 .is_none()
@@ -911,6 +954,10 @@ impl State {
 
     /// The pointer moved in the overview.
     pub fn overview_motion(&mut self, at: Point<f64, Logical>) {
+        if self.overview.as_ref().is_some_and(|o| o.grid.is_some()) {
+            self.grid_motion(at);
+            return;
+        }
         let now = self.now();
         let spot = self.overview_spot((at.x, at.y));
         // Over a thumbnail, a dragged window hangs under its words.
@@ -1002,6 +1049,10 @@ impl State {
             self.tell_shell(hocus_link::ToShell::ProjectEnd);
             return;
         }
+        if self.overview.as_ref().is_some_and(|o| o.grid.is_some()) {
+            self.grid_press(button, at);
+            return;
+        }
         let spot = self.overview_spot((at.x, at.y));
         let Some(overview) = &mut self.overview else {
             return;
@@ -1021,6 +1072,9 @@ impl State {
 
     /// A button let go in the overview: whether it was the overview's.
     pub fn overview_release(&mut self, button: u32, at: Point<f64, Logical>) -> bool {
+        if self.overview.as_ref().is_some_and(|o| o.grid.is_some()) {
+            return self.grid_release(button, at);
+        }
         let Some(overview) = &mut self.overview else {
             return false;
         };
@@ -1150,8 +1204,13 @@ impl State {
 
     /// A key while the overview is open.
     pub fn overview_key(&mut self, key: Key) {
+        if self.overview.as_ref().is_some_and(|o| o.grid.is_some()) {
+            self.grid_key(key);
+            return;
+        }
         match key {
-            Key::Close => self.close_overview(None),
+            Key::Close | Key::Escape => self.close_overview(None),
+            Key::AllDesktops => self.open_all_desktops(),
             Key::Nothing => {}
             Key::Enter => {
                 if let Some(output) = self.overview.as_ref().and_then(|o| o.button.clone()) {
@@ -1279,6 +1338,29 @@ impl State {
             }
             return true;
         }
+        let way = overview.way();
+        if let Some(grid) = &mut overview.grid {
+            let mut moving = now < grid.since + way;
+            if let Some((_, _, tween)) = grid.back {
+                if tween.done(now) {
+                    grid.back = None;
+                } else {
+                    moving = true;
+                }
+            }
+            if let Some(carry) = &grid.carry {
+                moving |= now < carry.since + LIFTING;
+            }
+            if lively {
+                let since = now.saturating_sub(grid.since);
+                moving |= overview.badges.values().any(|b| {
+                    b.state == AgentState::Waiting
+                        || since < hocus_pandas::lasts(crate::pandas::mood(b.state).burst())
+                });
+                moving |= empty_desktop && since < hocus_pandas::lasts(BREATHING);
+            }
+            return moving;
+        }
         let mut moving = now < overview.opened + overview.way();
         if let Some((_, _, tween)) = overview.back {
             if tween.done(now) {
@@ -1339,7 +1421,13 @@ impl State {
     /// in with reduced motion: `None` without the overview.
     pub fn overview_cover(&self, now: Duration) -> Option<f32> {
         let overview = self.overview.as_ref()?;
-        Some(if overview.reduced {
+        // Every desktop from the overview: the windows stay hidden, the
+        // grid fading in over the overview's way out.
+        let from_overview = overview
+            .grid
+            .as_ref()
+            .is_some_and(|g| g.from == grid::From::Overview && overview.closing.is_none());
+        Some(if overview.reduced && !from_overview {
             (1.0 - overview.shown(now)) as f32
         } else {
             0.0
@@ -1551,7 +1639,7 @@ mod tests {
 
     #[test]
     fn the_keys_of_the_overview() {
-        assert_eq!(Key::of(Keysym::Escape, false, None), Key::Close);
+        assert_eq!(Key::of(Keysym::Escape, false, None), Key::Escape);
         assert_eq!(Key::of(Keysym::Left, false, None), Key::Step(-1, 0));
         assert_eq!(Key::of(Keysym::Return, false, None), Key::Enter);
         assert_eq!(Key::of(Keysym::Tab, false, None), Key::Tab(true));
@@ -1567,6 +1655,10 @@ mod tests {
         assert_eq!(
             Key::of(Keysym::w, false, Some(crate::Action::Overview)),
             Key::Close
+        );
+        assert_eq!(
+            Key::of(Keysym::w, true, Some(crate::Action::AllDesktops)),
+            Key::AllDesktops
         );
         assert_eq!(Key::of(Keysym::a, false, None), Key::Nothing);
     }
@@ -1587,6 +1679,7 @@ mod tests {
             agents: HashMap::new(),
             button: None,
             reduced: false,
+            grid: None,
         };
         assert_eq!(o.shown(ms(1000)), 0.0);
         assert!(o.shown(ms(1120)) > 0.5);

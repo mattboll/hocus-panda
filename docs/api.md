@@ -95,8 +95,9 @@ Locks the session now, as `Super+L` does; answered once it is locked.
 ```
 
 The screens (`outputs`: each one's modes, place, scale and settings,
-whether it is on, plugged and primary) and the sets of screens the
-desktop knows, one JSON object.
+whether it is on, plugged and primary; a mirror's `mirrors`, the screen
+it shows) and the sets of screens the desktop knows, and `shown`, the
+screen shown while they are mirrored (else `null`), one JSON object.
 
 ```control
 > msg outputs
@@ -212,7 +213,9 @@ same as `hocus mcp`'s (design/mcp.md); `app_id` is its application's
 
 A screen shows another of its desktops: the screen, and the
 desktop's number (from 1) and name (its project's, or `[desktops]
-names`'; empty when none).
+names`'; empty when none). The screens linked (`[desktops] per-screen =
+false`, the default), every screen switches together: one event a
+screen, in the same turn.
 
 ```event
 {"event":"desktop-switched","screen":{"name":"eDP-1"},"desktop":{"number":2,"name":"hocus-site"}}

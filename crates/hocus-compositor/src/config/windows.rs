@@ -17,6 +17,30 @@ pub struct Desktops {
     /// browser file is read and browsers come back as plain applications.
     #[serde(rename = "remember-tabs")]
     pub remember_tabs: bool,
+    /// Whether every screen switches its desktop together or the screen
+    /// under the pointer alone (#947): `per-screen = false` or `true`.
+    #[serde(rename = "per-screen", deserialize_with = "switching")]
+    pub switching: Switching,
+}
+
+/// How the screens switch their desktops (docs/design/windows.md §12,
+/// #947).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Switching {
+    /// Every screen goes to the same number: desktop N is desktop N of
+    /// every screen.
+    #[default]
+    Together,
+    /// The screen under the pointer switches alone (#420).
+    PerScreen,
+}
+
+fn switching<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Switching, D::Error> {
+    Ok(if bool::deserialize(deserializer)? {
+        Switching::PerScreen
+    } else {
+        Switching::Together
+    })
 }
 
 impl Default for Desktops {
@@ -25,6 +49,7 @@ impl Default for Desktops {
             count: crate::desktops::DEFAULT_COUNT,
             names: Vec::new(),
             remember_tabs: true,
+            switching: Switching::Together,
         }
     }
 }

@@ -72,6 +72,8 @@ pub struct Screen {
     pub bar: Option<&'static str>,
     /// The form chosen there with a click or Super+Shift+B, remembered.
     pub bar_chosen: Option<&'static str>,
+    /// While it mirrors (#931): the screen whose picture it shows.
+    pub mirrors: Option<String>,
 }
 
 impl Screen {
@@ -168,6 +170,8 @@ pub struct Screens {
     pub set: Vec<String>,
     /// The sets known, the one in use first.
     pub sets: Vec<KnownSet>,
+    /// Mirrored (#931): the screen shown on the others.
+    pub shown: Option<String>,
 }
 
 /// A set of screens the compositor knows (windows.md §12, 6.9).
@@ -328,6 +332,16 @@ impl Screens {
     pub fn on(&self) -> impl Iterator<Item = &Screen> {
         self.plugged().filter(|s| s.enabled && !s.lid_closed)
     }
+
+    /// The screen shown while mirrored (#931).
+    pub fn shown(&self) -> Option<&Screen> {
+        self.get(self.shown.as_deref()?)
+    }
+
+    /// The mirrors (#931).
+    pub fn mirrors(&self) -> impl Iterator<Item = &Screen> {
+        self.on().filter(|s| s.mirrors.is_some())
+    }
 }
 
 /// What the compositor's line says.
@@ -468,6 +482,10 @@ pub fn read_line(line: &str) -> Option<Said> {
                     number: 0,
                     bar: form_word(o.get("bar")),
                     bar_chosen: form_word(o.get("bar_chosen")),
+                    mirrors: o
+                        .get("mirrors")
+                        .and_then(|m| m.as_str())
+                        .map(ToOwned::to_owned),
                 })
             })
             .collect();
@@ -532,6 +550,10 @@ pub fn read_line(line: &str) -> Option<Said> {
                 .unwrap_or(false),
             set: strings(value.get("set")),
             sets,
+            shown: value
+                .get("shown")
+                .and_then(|s| s.as_str())
+                .map(ToOwned::to_owned),
         }));
     }
     if let Some(trial) = value.get("trial") {
@@ -990,6 +1012,8 @@ pub const VRR: &str = "screens.vrr";
 pub const ROTATION: &str = "screens.rotation";
 pub const PRIMARY: &str = "screens.primary";
 pub const MIRROR: &str = "screens.mirror";
+/// "Montrer", under it while mirrored (#931).
+pub const SHOW: &str = "screens.mirror.show";
 pub const NIGHT_LIGHT: &str = "screens.night-light";
 pub const NIGHT_SCHEDULE: &str = "screens.night-light.schedule";
 pub const NIGHT_FROM: &str = "screens.night-light.from";
@@ -1132,15 +1156,45 @@ pub fn settings() -> &'static [Setting] {
                 (&["primaire", "barre"], &["primary", "main display", "bar"]),
                 &["panel", "output"],
             ),
+            // Mirroring (#931): kept with the set of screens in the
+            // compositor's state, not the file.
             s(
                 MIRROR,
                 ALL,
-                words::MIRRORING,
+                words::TWO_SCREENS,
                 (
-                    &["miroir", "dupliquer", "projecteur", "cloner"],
-                    &["mirror", "duplicate", "projector", "clone"],
+                    &[
+                        "recopier",
+                        "recopie",
+                        "miroir",
+                        "dupliquer",
+                        "cloner",
+                        "étendre",
+                        "projecteur",
+                        "télé",
+                        "présentation",
+                    ],
+                    &[
+                        "mirror",
+                        "duplicate",
+                        "clone",
+                        "extend",
+                        "projector",
+                        "tv",
+                        "presentation",
+                    ],
                 ),
-                &["outputs", "NAME", "mirror"],
+                &["screen-sets", "mirror"],
+            ),
+            s(
+                SHOW,
+                ALL,
+                words::SHOW,
+                (
+                    &["recopie", "montrer", "écran montré"],
+                    &["mirror", "show", "shown screen"],
+                ),
+                &["screen-sets", "mirror"],
             ),
             s(
                 SETS,

@@ -16,7 +16,10 @@
 //! windows.md §12), the winking panda comes out the same way with a blue
 //! bubble of two lines: "**L'écran externe 34 pouces est parti.**" /
 //! "Firefox et foot sont ici, sur le bureau 1."; a click on it sends it
-//! back.
+//! back. When a set of screens never seen lights (`screens-new`, #931),
+//! it says "**Écran externe 55 pouces branché.**" over a blue button
+//! « Recopier » (30 px, `#5B8DEF`) that asks the compositor to mirror the
+//! screens; a click elsewhere on it sends it back.
 //!
 //! The surface takes the pointer only where it draws: the bubble and the
 //! panda. A click on either goes to the agent (§8, 4.3), the streak from
@@ -37,7 +40,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hocus_link::{EDGE, Form, PEEK_NAMESPACE, Peek, PeekKind, ScreensMoved};
+use hocus_link::{EDGE, Form, PEEK_NAMESPACE, Peek, PeekKind, ScreensMoved, ScreensNew};
 use iced::{
     Color, Point, Rectangle, Renderer, Size, Theme,
     advanced::svg,
@@ -94,6 +97,14 @@ const BORDER_SCREENS: Ink = Ink::Dark(Color::from_rgba8(143, 179, 255, 0.45));
 const WORD_SCREENS: Ink = Ink::Dark(rgb(0xB9CEFF));
 /// A line of the screens' bubble longer than this is cut.
 const SCREENS_ROOM: f32 = 340.0;
+/// The new screens' bubble's button (#931): 30 px high, 10 px under its
+/// line, 12 px in at its sides, radius 8, white bold on `#5B8DEF`.
+const BUTTON_H: f32 = 30.0;
+const BUTTON_GAP: f32 = 10.0;
+const BUTTON_PAD: f32 = 12.0;
+const BUTTON_RADIUS: f32 = 8.0;
+const BUTTON: Ink = Ink::Dark(rgb(0x5B8DEF));
+const BUTTON_LIT: Ink = Ink::Dark(rgb(0x6F9CF2));
 /// The word after the name, in the rows' colours.
 const WORD_WAITING: Ink = Ink::Dark(rgb(0xF5C46E));
 const WORD_DONE: Ink = Ink::Dark(rgb(0x7EE0A0));
@@ -133,9 +144,13 @@ pub struct Placed {
 /// `form`, the panda's middle `middle` under the bar's top (the panda
 /// kept below the bar's top); `card`: on the CPU.
 pub fn placed(form: Form, middle: f32, width: f32, lines: usize, card: bool) -> Placed {
+    placed_tall(form, middle, width, bubble_height(lines), card)
+}
+
+/// As [`placed`], for a bubble `height` high.
+fn placed_tall(form: Form, middle: f32, width: f32, height: f32, card: bool) -> Placed {
     // In whole pixels: the panda's box keeps its place from the bar.
     let width = width.ceil();
-    let height = bubble_height(lines);
     let (left, top, right, bottom) = if card {
         (0.0, 0.0, CARD_END, 0.0)
     } else {
@@ -202,6 +217,15 @@ pub struct Said {
     /// The bubble's width.
     pub width: f32,
     pub lines: usize,
+    /// A button under the lines, its words and its width (#931).
+    pub button: Option<(String, f32)>,
+}
+
+impl Said {
+    /// The bubble's height.
+    fn height(&self) -> f32 {
+        bubble_height(self.lines) + self.button.as_ref().map_or(0.0, |_| BUTTON_GAP + BUTTON_H)
+    }
 }
 
 /// What a peek of `kind` for `name`, `minutes` since it began, says, in
@@ -236,6 +260,7 @@ pub fn said(
         pieces,
         width: x + PAD_X + BORDER,
         lines: 1,
+        button: None,
     }
 }
 
@@ -339,7 +364,46 @@ pub fn said_screens(
         ],
         width: x + width + PAD_X + BORDER,
         lines: 2,
+        button: None,
     }
+}
+
+/// What the new screens' bubble says (#931): "**Écran externe 55 pouces
+/// branché.**" in bold, light blue, over its « Recopier » button.
+pub fn said_new(
+    lang: Lang,
+    new: ScreensNew,
+    mut measure: impl FnMut(&str, iced::Font) -> f32,
+) -> Said {
+    let screen = match (new.built_in, new.inches) {
+        (true, _) => txt::LAPTOP_SCREEN.get(lang).to_owned(),
+        (false, 0) => txt::EXTERNAL_SCREEN.get(lang).to_owned(),
+        (false, i) => txt::inch_screen(lang, i),
+    };
+    let line = capital(&txt::plugged_in(lang, &screen));
+    let line = kit::elide(&line, SCREENS_ROOM, |t| measure(t, MANROPE_BOLD));
+    let label = txt::MIRROR.get(lang).to_owned();
+    let button = measure(&label, MANROPE_BOLD) + 2.0 * BUTTON_PAD;
+    let x = PAD_X + BORDER;
+    let width = measure(&line, MANROPE_BOLD).max(button);
+    Said {
+        pieces: vec![(line, x, WORD_SCREENS.get(), MANROPE_BOLD, 0)],
+        width: x + width + PAD_X + BORDER,
+        lines: 1,
+        button: Some((label, button)),
+    }
+}
+
+/// The button of a bubble placed at `bubble` saying `said`, if it has one.
+fn button_rect(said: &Said, bubble: Rectangle) -> Option<Rectangle> {
+    let (_, width) = said.button.as_ref()?;
+    Some(Rectangle::new(
+        Point::new(
+            bubble.x + PAD_X + BORDER,
+            bubble.y + PAD_Y + BORDER + said.lines as f32 * TEXT_SIZE * LINE + BUTTON_GAP,
+        ),
+        Size::new(*width, BUTTON_H),
+    ))
 }
 
 // --- The peek out, and its surfaces ---------------------------------------------
@@ -349,6 +413,8 @@ pub fn said_screens(
 enum Shown {
     Agent(Peek),
     Screens,
+    /// A set of screens never seen: « Recopier » offered (#931).
+    ScreensNew,
 }
 
 impl Shown {
@@ -356,7 +422,7 @@ impl Shown {
     fn agent(&self) -> Option<u64> {
         match self {
             Self::Agent(peek) => Some(peek.id),
-            Self::Screens => None,
+            Self::Screens | Self::ScreensNew => None,
         }
     }
 }
@@ -369,8 +435,9 @@ struct Out {
     surfaces: HashMap<String, (window::Id, Placed)>,
     /// Its panda playing its mood, from its first frame (#649).
     burst: Option<Burst>,
-    /// Its bubble and its panda under the pointer: the bubble lights.
-    lit: [bool; 2],
+    /// Its bubble, its panda and its button under the pointer: the
+    /// bubble lights, or the button.
+    lit: [bool; 3],
 }
 
 static OUT: Mutex<Option<Out>> = Mutex::new(None);
@@ -448,6 +515,16 @@ pub fn screens(moved: ScreensMoved) {
     show(Shown::Screens, said);
 }
 
+/// The compositor says a set of screens never seen lit (#931): the
+/// winking panda offers to mirror them beside each bar, in place of the
+/// one out.
+pub fn screens_new(new: ScreensNew) {
+    let said = said_new(Lang::of_messages(), new, |t, font| {
+        kit::measure(t, TEXT_SIZE, font)
+    });
+    show(Shown::ScreensNew, said);
+}
+
 /// `shown`, saying `said`, out beside each bar.
 fn show(shown: Shown, said: Said) {
     let bars = popover::with(|c| c.bar_forms());
@@ -456,11 +533,11 @@ fn show(shown: Shown, said: Said) {
         let mut before = out.take().map(|o| o.surfaces).unwrap_or_default();
         let mut surfaces = HashMap::new();
         for (bar, form) in bars {
-            let placed = placed(
+            let placed = placed_tall(
                 form,
                 middle(&bar, shown.agent(), form),
                 said.width,
-                said.lines,
+                said.height(),
                 card(),
             );
             let id = match before.remove(&bar) {
@@ -500,8 +577,9 @@ fn show(shown: Shown, said: Said) {
                 bars = surfaces.len(),
                 "the panda peeks out"
             ),
-            Shown::Screens => tracing::debug!(
+            Shown::Screens | Shown::ScreensNew => tracing::debug!(
                 said = %text.join(" "),
+                button = said.button.as_ref().map(|b| b.0.as_str()),
                 bars = surfaces.len(),
                 "the winking panda peeks out"
             ),
@@ -511,7 +589,7 @@ fn show(shown: Shown, said: Said) {
             said,
             surfaces,
             burst: None,
-            lit: [false; 2],
+            lit: [false; 3],
         });
     });
     // Its controls are built again for what it says.
@@ -623,7 +701,7 @@ impl Shown {
                 PeekKind::Waiting => Pose::Waiting,
                 PeekKind::Done => Pose::Done,
             },
-            Self::Screens => Pose::Wink,
+            Self::Screens | Self::ScreensNew => Pose::Wink,
         }
     }
 }
@@ -722,7 +800,7 @@ impl Back {
             if out.burst.is_none() && pandas::lively() && !card() {
                 let window = match out.shown {
                     Shown::Agent(_) => PLAYS,
-                    Shown::Screens => WAVES,
+                    Shown::Screens | Shown::ScreensNew => WAVES,
                 };
                 out.burst = Some(Burst::lasting(now, window));
             }
@@ -747,7 +825,12 @@ fn shown_on(bar: &str) -> Option<(Shown, Said, Placed)> {
 
 /// Whether the pointer is on the bubble or the panda.
 fn lit() -> bool {
-    out(|out| out.as_ref().is_some_and(|o| o.lit.iter().any(|l| *l)))
+    out(|out| out.as_ref().is_some_and(|o| o.lit[..2].iter().any(|l| *l)))
+}
+
+/// Whether the pointer is on the bubble's button.
+fn button_lit() -> bool {
+    out(|out| out.as_ref().is_some_and(|o| o.lit[2]))
 }
 
 impl<Message> canvas::Program<Message> for Back {
@@ -811,7 +894,29 @@ impl<Message> canvas::Program<Message> for Back {
             stroke(&mut f, placed.bubble, border.get());
         }
         let line = TEXT_SIZE * LINE;
-        let first = placed.bubble.center_y() - (said.lines.max(1) - 1) as f32 * line / 2.0;
+        let first = match button_rect(&said, placed.bubble) {
+            // Its lines at the top, its button under them (#931).
+            Some(button) => {
+                f.fill(
+                    &kit::rounded(button, BUTTON_RADIUS),
+                    if button_lit() { BUTTON_LIT } else { BUTTON }.get(),
+                );
+                if let Some((label, _)) = &said.button {
+                    f.fill_text(kit::text_in(
+                        MANROPE_BOLD,
+                        kit::text(
+                            label.clone(),
+                            Point::new(button.center_x(), button.center_y()),
+                            TEXT_SIZE,
+                            Color::WHITE,
+                            Alignment::Center,
+                        ),
+                    ));
+                }
+                placed.bubble.y + PAD_Y + BORDER + line / 2.0
+            }
+            None => placed.bubble.center_y() - (said.lines.max(1) - 1) as f32 * line / 2.0,
+        };
         for (text, x, colour, font, row) in &said.pieces {
             f.fill_text(kit::text_in(
                 *font,
@@ -859,6 +964,8 @@ impl<Message> canvas::Program<Message> for Back {
 pub enum Msg {
     /// The bubble or the panda clicked: to the agent, or back.
     Go,
+    /// The new screens' bubble's « Recopier » (#931).
+    Mirror,
     /// The pointer comes on (or leaves) the bubble (0) or the panda (1).
     Lit(usize, bool),
     Stale,
@@ -892,11 +999,15 @@ fn handle(bar: &str, message: Msg) {
                         row: placed.in_bar,
                     }]);
                 }
-                Shown::Screens => {
+                Shown::Screens | Shown::ScreensNew => {
                     tracing::debug!("the winking panda is clicked: it goes back");
                     popover::send(vec![Effect::PeekClose]);
                 }
             }
+        }
+        Msg::Mirror => {
+            tracing::debug!("« Recopier » clicked: the screens mirror");
+            popover::send(vec![Effect::Mirror(true)]);
         }
         Msg::Lit(i, on) => out(|out| {
             if let Some(lit) = out.as_mut().and_then(|o| o.lit.get_mut(i)) {
@@ -919,7 +1030,13 @@ fn build<'a>(bar: &str) -> iced::Element<'a, Msg> {
         .map(|p| p.0.as_str())
         .collect::<Vec<_>>()
         .join(" ");
-    let all: Vec<iced::Element<'a, Msg>> = regions(&placed)
+    let button = button_rect(&said, placed.bubble);
+    let label = said
+        .button
+        .as_ref()
+        .map(|b| b.0.clone())
+        .unwrap_or_default();
+    let mut all: Vec<iced::Element<'a, Msg>> = regions(&placed)
         .into_iter()
         .enumerate()
         .map(|(i, rect)| {
@@ -940,6 +1057,25 @@ fn build<'a>(bar: &str) -> iced::Element<'a, Msg> {
             .into()
         })
         .collect();
+    // Over the bubble: its button (#931).
+    if let Some(rect) = button {
+        let spot = mouse_area(Space::new().width(rect.width).height(rect.height))
+            .on_press(Msg::Mirror)
+            .on_enter(Msg::Lit(2, true))
+            .on_exit(Msg::Lit(2, false))
+            .interaction(mouse::Interaction::Pointer);
+        all.push(
+            pin(crate::ui::control(
+                spot,
+                "peek:Mirror",
+                hocus_a11y::Role::Button,
+                label,
+            ))
+            .x(rect.x)
+            .y(rect.y)
+            .into(),
+        );
+    }
     Stack::with_children(all)
         .width(iced::Length::Fill)
         .height(iced::Length::Fill)

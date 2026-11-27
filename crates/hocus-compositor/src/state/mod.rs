@@ -106,6 +106,8 @@ pub struct State {
     pub desktop_focus: HashMap<(String, usize), WindowId>,
     /// The bar's tiles, and a window moved over them (8.5 B).
     pub tile_drop: crate::tile_drop::TileDrop,
+    /// A client's drag carrying files, over the bars' connections (#957).
+    pub(crate) file_drag: Option<crate::file_drag::FileDrag>,
     /// Going to an agent, its streak under way (bar.md §8, 4.3).
     pub going: Option<crate::going::Going>,
     /// The halo around and over the bars (bar.md §6, 4.4).
@@ -186,6 +188,8 @@ pub struct State {
     pub(crate) displays: crate::displays::Displays,
     /// The screens' identities and their sets (windows.md §12).
     pub(crate) screen_sets: crate::screen_sets::Sets,
+    /// Mirroring: one screen's picture on the others (#931).
+    pub(crate) mirror: crate::mirror::Mirror,
     /// The mice and touchpads, and what they were given (6.12).
     pub input_devices: crate::input_devices::InputDevices,
     /// The control socket's subscribers to the desktop's events
@@ -337,6 +341,7 @@ impl State {
             strips: HashMap::new(),
             desktop_focus: HashMap::new(),
             tile_drop: crate::tile_drop::TileDrop::default(),
+            file_drag: None,
             going: None,
             halo,
             peek: crate::peek::Peeks::default(),
@@ -375,6 +380,7 @@ impl State {
             mcp: crate::mcp::Mcp::default(),
             displays: crate::displays::Displays::default(),
             screen_sets,
+            mirror: crate::mirror::Mirror::default(),
             input_devices: crate::input_devices::InputDevices::default(),
             events: crate::events::Events::default(),
             idle,
@@ -516,6 +522,10 @@ pub struct ClientState {
     /// it as it started it (`WAYLAND_SOCKET`): its lock surfaces are the
     /// only ones shown (7.1).
     pub shell: bool,
+    /// The application a client that may read and set the clipboard
+    /// whatever holds the keyboard is (data control, #957): KDE Connect's
+    /// daemon, by its program ([`crate::data_control`]).
+    pub data_control: Option<String>,
 }
 
 impl ClientData for ClientState {

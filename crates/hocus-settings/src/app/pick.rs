@@ -446,15 +446,20 @@ impl App {
         .into()
     }
 
-    /// The gestures the shortcuts bind, a line a finger count: "3 doigts
-    /// ← → : Bureau de droite, Bureau de gauche".
+    /// The gestures the shortcuts bind, a line a finger count and an
+    /// axis: "3 doigts ← → : Bureau de droite, Bureau de gauche", then
+    /// "3 doigts ↓ : Tous les bureaux" (#944).
     pub(super) fn gestures_said(&self) -> Vec<(u8, Vec<Toward>, String)> {
         let lang = self.lang;
         let mut out = Vec::new();
-        for n in FINGERS {
+        let axes = [[Toward::Left, Toward::Right], [Toward::Up, Toward::Down]];
+        for (n, axis) in FINGERS
+            .into_iter()
+            .flat_map(|n| axes.into_iter().map(move |axis| (n, axis)))
+        {
             let mut ways = Vec::new();
             let mut names = Vec::new();
-            for toward in Toward::ALL {
+            for toward in axis {
                 let swipe = Trigger::Swipe { fingers: n, toward };
                 if let Some(owner) = self.trigger_holder(swipe, "") {
                     ways.push(toward);

@@ -518,7 +518,9 @@ the 5.10 mockup: the indicator in the bar.
 - One recording at a time.
 - Locking the screen stops and saves it.
 - A screen unplugged during a recording of that screen stops and saves
-  it.
+  it; so does one that starts mirroring another (#931): a mirror is no
+  screen of the desktop. Captures (`Print`, `Shift+Print`) take the
+  screen shown, as any screen.
 
 ### As built (5.10, 2026-11-03)
 

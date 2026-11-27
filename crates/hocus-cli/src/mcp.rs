@@ -470,7 +470,8 @@ fn tools() -> Vec<Value> {
             "name": "list_desktops",
             "title": "List desktops",
             "description": "Each screen's desktops: the one it shows (current, from 1), and each \
-                desktop's number, name and how many windows it holds.",
+                desktop's number, name and how many windows it holds; and whether the screens \
+                are linked (`linked`: every screen switches its desktop together).",
             "inputSchema": none,
             "annotations": read,
         }),
@@ -478,7 +479,9 @@ fn tools() -> Vec<Value> {
             "name": "list_outputs",
             "title": "List screens",
             "description": "The screens: name, geometry in the global logical space, the work area \
-                windows go in (without the bar), scale.",
+                windows go in (without the bar), scale. A screen mirroring another shows that \
+                screen's picture and has no place of its own: it is listed with `mirror_of`, the \
+                screen it shows, and no geometry.",
             "inputSchema": none,
             "annotations": read,
         }),
@@ -546,9 +549,11 @@ fn tools() -> Vec<Value> {
             "name": "switch_desktop",
             "title": "Switch desktop",
             "description": "A screen shows another of its desktops: it changes what the user \
-                sees, so only when the user asked to see that desktop. To work out of sight, \
-                launch onto another desktop or move a window there instead. Shown to the user \
-                first; the user can undo it.",
+                sees, so only when the user asked to see that desktop. When the screens are \
+                linked (list_desktops' `linked`), every screen switches to that desktop, whatever \
+                `output` names; the answer lists each screen that switched. To work out of \
+                sight, launch onto another desktop or move a window there instead. Shown to the \
+                user first; the user can undo it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

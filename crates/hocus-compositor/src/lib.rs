@@ -26,6 +26,7 @@ mod clipboard;
 mod config;
 mod contrast;
 mod cursor;
+mod data_control;
 mod decoration;
 mod desktop_set;
 pub mod desktops;
@@ -33,6 +34,7 @@ mod displays;
 mod effects;
 mod emoji;
 mod events;
+mod file_drag;
 mod focus;
 mod foreign;
 mod front;
@@ -61,6 +63,7 @@ mod magnet;
 mod magnifier;
 mod matrix;
 mod mcp;
+mod mirror;
 pub mod model;
 pub mod motion;
 mod moving;
@@ -135,20 +138,23 @@ pub use config::{
     OutputSettings, Overview as OverviewSettings, PanelScreens, PeekRule, Perf as PerfSettings,
     Power as PowerSettings, PowerAc, PowerBattery, PowerButton, RainWhen, Recording, Remind,
     Removable as RemovableSettings, Rule as WindowRule, ScaleFrom, ScreenSet, SessionSettings,
-    SetScreen, SoundPrograms, Strength as LightStrength, SystemKeyboard,
-    Wallpaper as WallpaperSettings, Warmth as LightWarmth, Weather as WeatherSettings,
-    WeatherUnits, Windows,
+    SetScreen, SoundPrograms, Strength as LightStrength, Switching as DesktopSwitching,
+    SystemKeyboard, Wallpaper as WallpaperSettings, Warmth as LightWarmth,
+    Weather as WeatherSettings, WeatherUnits, Windows,
 };
 pub use cursor::CursorEnv;
 /// An Xcursor file, for tests' cursor themes.
 #[doc(hidden)]
 pub use cursor::theme::{TestImage, encode as encode_xcursor};
+pub use data_control::Allowed as DataControlAllowed;
 pub use events::MOST as EVENTS_KEPT;
-pub use harness::{Headless, Placed, WindowInfo};
+pub use harness::{Headless, Placed, StripLook, WindowInfo};
 /// The bar's forms.
 pub use hocus_link::Form as BarForm;
 pub use lock::{Authenticator, LockState};
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
+/// What every desktop's labels say and its keyboard's selection (#944).
+pub use overview::grid::{Label as GridLabel, Selection as GridSelection};
 pub use record::{RecordInfo, Source as RecordSource};
 pub use screen_sets::Identity as ScreenIdentity;
 pub use share::ShareInfo;

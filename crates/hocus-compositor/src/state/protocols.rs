@@ -57,12 +57,15 @@ pub struct Protocols {
     /// Clients that take every key, the desktop's shortcuts with them
     /// (the Settings while they record one, 6.8).
     pub shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
+    /// The clipboard for KDE Connect's daemon alone (#957, lot 2).
+    pub data_control: crate::data_control::DataControl,
 }
 
 impl Protocols {
     /// The protocols' globals, made in the order clients have always seen
     /// them: the seat's and the primary selection's are made before, by
-    /// `State::new`.
+    /// `State::new`; the data control's (#957), which few clients see,
+    /// last.
     pub(super) fn new(
         dh: &DisplayHandle,
         seat_state: SeatState<State>,
@@ -86,7 +89,6 @@ impl Protocols {
             output_manager_state: OutputManagerState::new_with_xdg_output::<State>(dh),
             seat_state,
             data_device_state: DataDeviceState::new::<State>(dh),
-            primary_selection_state,
             activation_state: XdgActivationState::new::<State>(dh),
             fractional_scale_state: FractionalScaleManagerState::new::<State>(dh),
             // CLOCK_MONOTONIC, as the frame times.
@@ -99,6 +101,10 @@ impl Protocols {
             _pointer_gestures: PointerGesturesState::new::<State>(dh),
             _relative_pointer: RelativePointerManagerState::new::<State>(dh),
             shortcuts_inhibit_state: KeyboardShortcutsInhibitState::new::<State>(dh),
+            data_control: crate::data_control::DataControl::new(dh, &primary_selection_state),
+            // Its global made already: moved after the data control's
+            // borrow.
+            primary_selection_state,
         }
     }
 }

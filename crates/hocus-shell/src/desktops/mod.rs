@@ -90,6 +90,33 @@ pub fn screens(bar: &str) -> Vec<DeskScreen> {
         })
 }
 
+/// Every screen the shell was told of: bar `bar`'s, in its rows' order,
+/// then the other bars' (`[panel] screens = "all"`), by name.
+fn known_screens(bar: &str) -> Vec<DeskScreen> {
+    let mut all = screens(bar);
+    let mut others: Vec<DeskScreen> = SCREENS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .map(|s| s.values().flatten().cloned().collect())
+        .unwrap_or_default();
+    others.sort_by(|a, b| a.output.cmp(&b.output));
+    for screen in others {
+        if !all.iter().any(|s| s.output == screen.output) {
+            all.push(screen);
+        }
+    }
+    all
+}
+
+/// Screen `output` as the compositor named it to a bar, if one was told
+/// of it.
+pub fn known_screen(output: &str) -> Option<DeskScreen> {
+    known_screens(output)
+        .into_iter()
+        .find(|s| s.output == output && s.number > 0)
+}
+
 /// The screen of bar `bar`'s row `row` (from 0: its own), if there is one.
 pub fn screen_of(bar: &str, row: u8) -> Option<DeskScreen> {
     screens(bar).into_iter().nth(usize::from(row))
@@ -257,7 +284,7 @@ pub fn set(desktops: Desktops) {
     let shape = (desktops.count, desktops.projects.is_empty());
     icons::want(desktops.windows.iter().map(|w| w.app.as_str()));
     let mut before = None;
-    listed(&output, || {
+    listed(|| {
         before = DESKTOPS
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -279,7 +306,7 @@ pub fn set(desktops: Desktops) {
 /// list draws for them, if it shows that screen's.
 pub fn set_titles(titles: Titles) {
     let output = titles.output.clone();
-    listed(&output, || {
+    listed(|| {
         TITLES
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -300,6 +327,34 @@ pub fn set_recent(recent: Recent) {
     crate::windows::changed();
 }
 
+/// What desktop `index`'s list on bar `bar` shows, for screen `output`'s
+/// tile: its windows; a project on several screens (the screens linked,
+/// #947), every screen's, grouped in bar `bar`'s rows' order, with each
+/// group's screen and its first row (none for a screen with no window
+/// there).
+pub fn listed_rows(bar: &str, output: &str, index: usize) -> (Vec<Row>, Vec<(usize, DeskScreen)>) {
+    let Some(name) = project(output, index).map(|p| p.name) else {
+        return (rows(output, index), Vec::new());
+    };
+    let spanned: Vec<DeskScreen> = known_screens(bar)
+        .into_iter()
+        .filter(|s| project(&s.output, index).is_some_and(|p| p.name == name))
+        .collect();
+    if spanned.len() < 2 {
+        return (rows(output, index), Vec::new());
+    }
+    let mut all = Vec::new();
+    let mut labels = Vec::new();
+    for screen in spanned {
+        let theirs = rows(&screen.output, index);
+        if !theirs.is_empty() {
+            labels.push((all.len(), screen));
+            all.extend(theirs);
+        }
+    }
+    (all, labels)
+}
+
 /// The screen and the desktop of the list that shows, and its bar.
 fn list_open() -> Option<(String, String, usize)> {
     popover::with(|c| match c.open_on() {
@@ -312,14 +367,16 @@ fn list_open() -> Option<(String, String, usize)> {
     })
 }
 
-/// `change` on screen `output`'s desktops: the list draws again if it
-/// shows one of them and its rows changed.
-fn listed(output: &str, change: impl FnOnce()) {
-    let open = list_open().filter(|(_, screen, _)| screen == output);
-    let before = open.as_ref().map(|(_, screen, index)| rows(screen, *index));
+/// `change` on a screen's desktops: the list draws again if what it
+/// shows changed (a project's, #947, shows every screen's windows).
+fn listed(change: impl FnOnce()) {
+    let open = list_open();
+    let before = open
+        .as_ref()
+        .map(|(bar, screen, index)| listed_rows(bar, screen, *index));
     change();
     if let Some((bar, screen, index)) = open
-        && before.as_ref() != Some(&rows(&screen, index))
+        && before.as_ref() != Some(&listed_rows(&bar, &screen, index))
     {
         list_changed(Some(&bar));
     }

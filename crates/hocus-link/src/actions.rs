@@ -189,11 +189,28 @@ pub struct Def {
     pub shortcut: Option<&'static str>,
     pub glyph: Glyph,
     pub runs: Runs,
+    /// Its names while it is on, when they change (`mirror`: "Étendre les
+    /// écrans" while mirrored, #931).
+    pub on_names: Option<(&'static str, &'static str)>,
 }
 
 impl Def {
     pub fn name(&self, fr: bool) -> &'static str {
         if fr { self.fr } else { self.en }
+    }
+
+    /// Its name, `on` or not: the one it has while on, if it has one.
+    pub fn name_now(&self, fr: bool, on: bool) -> &'static str {
+        match self.on_names {
+            Some((fr_on, en_on)) if on => {
+                if fr {
+                    fr_on
+                } else {
+                    en_on
+                }
+            }
+            _ => self.name(fr),
+        }
     }
 
     /// Its name without its "…", for a step's target after it: "Envoyer
@@ -228,6 +245,7 @@ const fn d(
         shortcut: None,
         glyph,
         runs: Runs::Compositor,
+        on_names: None,
     }
 }
 
@@ -254,6 +272,11 @@ impl Def {
 
     const fn shell(mut self) -> Self {
         self.runs = Runs::Shell;
+        self
+    }
+
+    const fn when_on(mut self, fr: &'static str, en: &'static str) -> Self {
+        self.on_names = Some((fr, en));
         self
     }
 }
@@ -351,7 +374,7 @@ const WORKSPACE: &[&str] = &["espace de travail", "workspace"];
 const MOVE_SCREEN: &[&str] = &["déplacer", "moniteur", "move", "monitor", "display"];
 
 /// The actions, in each category's order.
-const ACTIONS: [Def; 67] = [
+const ACTIONS: [Def; 69] = [
     // The window.
     d(
         "close",
@@ -663,6 +686,28 @@ const ACTIONS: [Def; 67] = [
         G::Grid,
     )
     .key("overview"),
+    // Its id is not its shortcut's key: "all-desktops" is the window's
+    // switch (#723).
+    d(
+        "every-desktop",
+        "Tous les bureaux",
+        "Every desktop",
+        &[
+            "tous les bureaux",
+            "zoom",
+            "dézoomer",
+            "reculer",
+            "grille",
+            "every desktop",
+            "zoom out",
+            "grid",
+            "exposé",
+            "mission control",
+        ],
+        C::Desktops,
+        G::Grid,
+    )
+    .key("all-desktops"),
     // The screens.
     d(
         "brightness-up",
@@ -682,6 +727,34 @@ const ACTIONS: [Def; 67] = [
         G::Brightness,
     )
     .key("brightness-down"),
+    // Mirroring (#931): toggles at once, named for what it does now.
+    d(
+        "mirror",
+        "Recopier les écrans",
+        "Mirror the screens",
+        &[
+            "recopier",
+            "recopie",
+            "miroir",
+            "dupliquer",
+            "cloner",
+            "étendre",
+            "projecteur",
+            "télé",
+            "présentation",
+            "mirror",
+            "duplicate",
+            "clone",
+            "extend",
+            "projector",
+            "tv",
+            "presentation",
+        ],
+        C::Screens,
+        G::Screen,
+    )
+    .when_on("Étendre les écrans", "Extend the screens")
+    .key("mirror"),
     // The wallpaper's next picture, while it is a folder's (#894).
     d(
         "next-wallpaper",
@@ -1309,6 +1382,7 @@ pub fn key_shown(key: &str, fr: bool) -> String {
         } else {
             "Brightness −"
         }),
+        "xf86display" => Some(if fr { "Touche écran" } else { "Display key" }),
         _ => None,
     };
     match named {

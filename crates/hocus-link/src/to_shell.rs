@@ -109,6 +109,16 @@ pub enum ToShell {
         bar: String,
         over: Option<(String, u8)>,
     },
+    /// A drag carrying files (`text/uri-list`) is over bar `bar`'s
+    /// connections' surface at `at` (logical pixels, from that surface's
+    /// corner), or has left it (`None`): the phone's row under it lights,
+    /// the shell taking the drag's offer there (bar.md "The phone", #957).
+    /// Sent as it moves there, once a whole pixel; the bar stays in front
+    /// meanwhile.
+    FileDrag { bar: String, at: Option<(i32, i32)> },
+    /// That drag was let go there, the shell's offer taken: its files go
+    /// to the row lit. The drag is over.
+    FileDropped { bar: String },
     /// Whether the bar shows its screen's windows (`[panel] windows`, #604):
     /// sent as the shell connects and when the configuration changes it.
     BarWindows(bool),
@@ -167,6 +177,16 @@ pub enum ToShell {
     /// a peek out unless that is an agent's, which it never replaces; it goes
     /// back as a peek does (`no-peek`).
     ScreensMoved(ScreensMoved),
+    /// A set of screens never seen before lit (#931, windows.md §12
+    /// "Mirroring"): the winking panda comes out as for
+    /// [`ToShell::ScreensMoved`](crate::ToShell::ScreensMoved), saying the screen plugged, with a
+    /// « Recopier » button that answers [`ToCompositor::Mirror`](crate::ToCompositor::Mirror); it goes
+    /// back as a peek does (`no-peek`).
+    ScreensNew(ScreensNew),
+    /// Mirroring (#931): the screen shown and those that show its
+    /// picture; `None`, no longer. Sent as it starts and stops, and as the
+    /// shell connects: the bar's « Recopie » sign, the notifications held.
+    Mirror(Option<MirrorShown>),
     /// Whether the agents' rows show each agent's panda, or a dot of its
     /// state's colour (`[agents] pandas`, 6.16): sent as the shell connects and
     /// when the configuration changes it.
@@ -499,6 +519,35 @@ pub struct ScreensMoved {
     /// Their applications' ids, the focused window's first; empty when
     /// one says none.
     pub apps: Vec<String>,
+}
+
+/// A screen plugged that made a set never seen before
+/// ([`ToShell::ScreensNew`](crate::ToShell::ScreensNew)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreensNew {
+    /// It is the laptop's own.
+    pub built_in: bool,
+    /// Its diagonal, 0 unknown.
+    pub inches: u32,
+}
+
+/// A screen, as mirroring names it ([`MirrorShown`]): its connector, and
+/// the words people know it by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MirrorScreen {
+    #[serde(serialize_with = "tidy::name")]
+    pub output: String,
+    pub built_in: bool,
+    /// Its diagonal, 0 unknown.
+    pub inches: u32,
+}
+
+/// What mirroring shows ([`ToShell::Mirror`](crate::ToShell::Mirror)): the screen shown, and the
+/// screens that show its picture.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MirrorShown {
+    pub shown: MirrorScreen,
+    pub mirrors: Vec<MirrorScreen>,
 }
 
 /// Why the panda peeks out: its agent waits for the user (it holds out its

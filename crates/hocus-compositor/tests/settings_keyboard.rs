@@ -374,8 +374,8 @@ fn the_shortcuts_are_on_a_sub_page_with_their_own_search() -> anyhow::Result<()>
         ]
     );
     let shown = bed.shortcuts()?;
-    // 73 actions: three families of nine folded, 46 others.
-    assert_eq!(shortcut_ids(&shown).len(), 49, "{:?}", shortcut_ids(&shown));
+    // 75 actions: three families of nine folded, 48 others.
+    assert_eq!(shortcut_ids(&shown).len(), 51, "{:?}", shortcut_ids(&shown));
     // Its own search: Print's.
     bed.click("shortcuts:search")?;
     bed.type_text("impr")?;
@@ -524,14 +524,15 @@ fn a_gesture_taken_from_another_action_writes_both_lines() -> anyhow::Result<()>
     bed.open()?;
     let shown = bed.shortcuts()?;
     assert_eq!(
-        shown["keys"]["triggers"], 5,
-        "the defaults' gestures and corner"
+        shown["keys"]["triggers"], 7,
+        "the defaults' gestures and corners"
     );
     assert_eq!(
         shortcut(&shown, "shortcuts.overview")["triggers"],
         serde_json::json!(["corner:top-left", "swipe:4:down"])
     );
-    // A free corner: the lock's at once. The bar's is not offered.
+    // A free corner: the lock's at once. The top-right one is every
+    // desktop's, never the bar's (#944).
     bed.click("add:shortcuts.lock")?;
     bed.shows(|s| s["keys"]["picker"]["tab"] == "gesture")?;
     bed.click("tab:corner")?;
@@ -539,7 +540,8 @@ fn a_gesture_taken_from_another_action_writes_both_lines() -> anyhow::Result<()>
     let items = &shown["keys"]["picker"]["items"];
     assert_eq!(items[0]["standing"], "taken");
     assert_eq!(items[0]["owner"], "shortcuts.overview");
-    assert_eq!(items[1]["standing"], "bar");
+    assert_eq!(items[1]["standing"], "taken");
+    assert_eq!(items[1]["owner"], "shortcuts.all-desktops");
     bed.click("take:corner:bottom-right")?;
     let text = bed.written(|t| t.contains("lock = "))?;
     assert_eq!(
@@ -582,6 +584,41 @@ fn a_gesture_taken_from_another_action_writes_both_lines() -> anyhow::Result<()>
     // The corner's chip ✕.
     bed.click("unchip:shortcuts.lock:corner:bottom-right")?;
     bed.written(|t| t.contains("lock = [\"Super+L\", \"swipe:4:up\"]"))?;
+    Ok(())
+}
+
+/// Every desktop's row (#944): its keys, three fingers down and the
+/// top-right corner; the ✕ on the fingers writes the line without them,
+/// and three fingers down then reach the application.
+#[test]
+fn every_desktop_s_row_and_its_fingers_taken_away() -> anyhow::Result<()> {
+    use hocus_config::triggers::{Toward, Trigger};
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shortcuts()?;
+    let row = shortcut(&shown, "shortcuts.all-desktops");
+    assert_eq!(row["keys"], serde_json::json!(["Super + Maj + W"]));
+    assert_eq!(
+        row["triggers"],
+        serde_json::json!(["corner:top-right", "swipe:3:down"])
+    );
+    bed.click("unchip:shortcuts.all-desktops:swipe:3:down")?;
+    bed.written(|t| t.contains("all-desktops = [\"Super+Shift+W\", \"corner:top-right\"]"))?;
+    let down = Trigger::Swipe {
+        fingers: 3,
+        toward: Toward::Down,
+    };
+    let taken = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.state().config.trigger_action(down).is_none())?;
+    anyhow::ensure!(taken, "the compositor kept three fingers down");
+    let given = bed.hp.swipes_given();
+    bed.hp.swipe(3, &[(0.0, 30.0); 5], 10);
+    wait(&mut bed.hp, Duration::from_millis(100))?;
+    assert_eq!(bed.hp.all_desktops(), None);
+    assert_eq!(bed.hp.swipes_given(), (given.0 + 1, given.1 + 5));
     Ok(())
 }
 
@@ -822,5 +859,33 @@ fn screenshots_for_the_pull_request() -> anyhow::Result<()> {
     bed.record("shortcuts.desktop-left", 0)?;
     settle(&mut bed)?;
     shoot(&mut bed, "shortcuts-recording.png")?;
+    Ok(())
+}
+
+/// Acceptance 20 of mirroring (#931): "Recopier les écrans" shows
+/// `Super + Maj + P` and `Touche écran`; `Super + Maj + P` taken off (its
+/// keycaps clicked, then Backspace) leaves the display key alone.
+#[test]
+fn mirroring_s_row_shows_its_two_keys() -> anyhow::Result<()> {
+    const KEY_BACKSPACE: u32 = 14;
+    let Some(mut bed) = Bed::start(FILE)? else {
+        return Ok(());
+    };
+    bed.open()?;
+    let shown = bed.shortcuts()?;
+    let row = shortcut(&shown, "shortcuts.mirror");
+    assert_eq!(
+        row["keys"],
+        serde_json::json!(["Super + Maj + P", "Touche écran"])
+    );
+    bed.reveal("chord:shortcuts.mirror:0")?;
+    bed.record("shortcuts.mirror", 0)?;
+    bed.hp.key(KEY_BACKSPACE, true);
+    bed.hp.key(KEY_BACKSPACE, false);
+    let text = bed.written(|t| t.contains("mirror = "))?;
+    assert!(
+        text.contains("mirror = \"XF86Display\"") || text.contains("mirror = [\"XF86Display\"]"),
+        "{text}"
+    );
     Ok(())
 }

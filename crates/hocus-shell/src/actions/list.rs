@@ -146,7 +146,8 @@ impl Seen<'_> {
         ActionRow {
             def,
             arg: None,
-            label: def.name(self.fr).to_owned(),
+            // "Étendre les écrans" while mirrored (#931).
+            label: def.name_now(self.fr, self.shown.is_on(def.id)).to_owned(),
             marks: Vec::new(),
             keyword: None,
             inert,
@@ -330,7 +331,7 @@ pub fn actions(query: &str, seen: &Seen) -> Vec<Row> {
                 continue;
             }
         }
-        let label = def.name(seen.fr);
+        let label = def.name_now(seen.fr, seen.shown.is_on(def.id));
         let Some(m) = matches(def, &typed, seen.fr, label).filter(|m| m.score > LEAST) else {
             continue;
         };

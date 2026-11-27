@@ -44,15 +44,13 @@ impl Corner {
         matches!(self, Self::TopLeft | Self::BottomLeft)
     }
 
-    /// The bar's own corner, with the bar on that side (`[panel] side`):
-    /// the pointer pushed there brings the bar in front, so it takes no
-    /// action.
+    /// The bar's own corner: the top-left one with the bar on the left
+    /// (`[panel] side = "left"`), where the pointer pushed brings the bar
+    /// in front, so it takes no action. The top-right one is never the
+    /// bar's (#944): its pixel is above the bar's edge, which starts level
+    /// with the bar, so it acts with the bar on the right too.
     pub fn bars(self, bar_on_the_left: bool) -> bool {
-        self == if bar_on_the_left {
-            Self::TopLeft
-        } else {
-            Self::TopRight
-        }
+        bar_on_the_left && self == Self::TopLeft
     }
 }
 
@@ -192,7 +190,7 @@ const fn swipe(fingers: u8, toward: Toward) -> Trigger {
 }
 
 /// Every default trigger an older switch takes away when false.
-pub const RETIRED: [Retired; 5] = [
+pub const RETIRED: [Retired; 6] = [
     Retired {
         switch: ["touchpad", "swipe-desktops"],
         action: "desktop-left",
@@ -202,6 +200,12 @@ pub const RETIRED: [Retired; 5] = [
         switch: ["touchpad", "swipe-desktops"],
         action: "desktop-right",
         trigger: swipe(3, Toward::Left),
+    },
+    // Three fingers stay the application's whole (#944).
+    Retired {
+        switch: ["touchpad", "swipe-desktops"],
+        action: "all-desktops",
+        trigger: swipe(3, Toward::Down),
     },
     Retired {
         switch: ["touchpad", "swipe-launcher"],
@@ -284,7 +288,15 @@ mod tests {
             Trigger::Corner(Corner::TopLeft),
             corner_off
         ));
-        assert!(Corner::TopRight.bars(false) && Corner::TopLeft.bars(true));
-        assert!(!Corner::BottomRight.bars(false));
+        assert!(retired(
+            "all-desktops",
+            swipe(3, Toward::Down),
+            desktops_off
+        ));
+        // The bar's corner is the top-left one with the bar on the left
+        // only; the top-right one is never the bar's (#944).
+        assert!(Corner::TopLeft.bars(true));
+        assert!(!Corner::TopRight.bars(false) && !Corner::TopLeft.bars(false));
+        assert!(!Corner::TopRight.bars(true) && !Corner::BottomRight.bars(false));
     }
 }

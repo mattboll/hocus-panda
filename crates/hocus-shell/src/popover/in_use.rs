@@ -10,7 +10,10 @@
 //! button does; **Arrêter le partage** for each share (5.11's blue),
 //! which ends its session; the recording's pause (or go on) and
 //! **Arrêter l'enregistrement** (5.10's colours). Under the lines, while
-//! sharing, how many notifications wait for its end. 290 wide, 12 px in,
+//! sharing, how many notifications wait for its end. Mirroring's line
+//! comes first (#931): "Recopie", "Écran du portable → écran externe 55
+//! pouces", the notifications held (none said at none), and **Arrêter la
+//! recopie** (`#F2945B` on its tint). 290 wide, 12 px in,
 //! its parts 8 px apart. A use that ended keeps its line while it
 //! lingers, without its button.
 //!
@@ -88,6 +91,11 @@ const REC_PAUSE: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.06));
 const REC_STOP: Ink = Ink::Dark(Color::from_rgba8(242, 84, 91, 0.85));
 const REC_HOVER: Ink = Ink::Dark(Color::from_rgba8(255, 255, 255, 0.10));
 const REC_ICON: Ink = Ink::Dark(rgb(0xEEF1F6));
+/// Mirroring's stop (#931): `#F2945B` on its tint, in its ring.
+const MIRROR_STOP: Ink = Ink::Dark(rgb(0xF2945B));
+const MIRROR_STOP_FILL: Ink = Ink::Dark(Color::from_rgba8(242, 148, 91, 0.14));
+const MIRROR_STOP_RING: Ink = Ink::Dark(Color::from_rgba8(242, 148, 91, 0.45));
+const MIRROR_FILL: Ink = Ink::Dark(Color::from_rgba8(108, 194, 135, 0.16));
 
 /// Its times go on while it shows: built again each second.
 const TICK: Duration = Duration::from_secs(1);
@@ -95,6 +103,8 @@ const TICK: Duration = Duration::from_secs(1);
 /// A use's line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Line {
+    /// The screens mirrored (#931).
+    Mirror,
     Microphone(usize),
     Camera(usize),
     /// A meeting's transcription (docs/design/meetings.md).
@@ -106,6 +116,7 @@ enum Line {
 impl Line {
     fn kind(self) -> Kind {
         match self {
+            Self::Mirror => Kind::Mirror,
             Self::Microphone(_) => Kind::Microphone,
             Self::Camera(_) => Kind::Camera,
             Self::Transcription => Kind::Transcription,
@@ -122,6 +133,7 @@ pub enum Target {
     Pause,
     StopRecording,
     StopTranscription,
+    StopMirror,
 }
 
 impl Target {
@@ -154,8 +166,11 @@ fn layout(uses: &Uses) -> Layout {
     let title = y + TITLE * LINE / 2.0;
     y += TITLE * LINE;
     let mut lines = Vec::new();
-    let all = (0..uses.microphone.len())
-        .map(Line::Microphone)
+    let all = uses
+        .mirror
+        .iter()
+        .map(|_| Line::Mirror)
+        .chain((0..uses.microphone.len()).map(Line::Microphone))
         .chain((0..uses.camera.len()).map(Line::Camera))
         .chain(uses.transcription.iter().map(|_| Line::Transcription))
         .chain(uses.recording.iter().map(|_| Line::Recording))
@@ -165,7 +180,7 @@ fn layout(uses: &Uses) -> Layout {
         lines.push((line, y));
         y += line_height();
     }
-    let held = (uses.live_shares().count() > 0).then(|| {
+    let held = held_shown(uses).then(|| {
         y += GAP;
         let middle = y + HELD * LINE / 2.0;
         y += HELD * LINE;
@@ -182,6 +197,9 @@ fn layout(uses: &Uses) -> Layout {
         }
         *y += BUTTON;
     };
+    if uses.mirror.is_some() {
+        row(&mut y, &[(Target::StopMirror, left, room)]);
+    }
     if !uses.microphone.is_empty() {
         row(&mut y, &[(Target::Mute, left, room)]);
     }
@@ -208,6 +226,25 @@ fn layout(uses: &Uses) -> Layout {
         buttons,
         height: y + PAD + BORDER,
     }
+}
+
+/// Whether the notifications held are said: while sharing, even none;
+/// while mirrored alone, only some (#931).
+fn held_shown(uses: &Uses) -> bool {
+    uses.live_shares().count() > 0
+        || (uses.mirror.is_some()
+            && crate::notifications::with(|c| c.stack.held_while_sharing()) > 0)
+}
+
+/// The held notifications' line.
+fn held_said(words: Words, uses: &Uses) -> String {
+    let n = crate::notifications::with(|c| c.stack.held_while_sharing());
+    if uses.live_shares().count() == 0
+        && let Some(said) = words.held_mirroring(n)
+    {
+        return said;
+    }
+    words.held(n)
 }
 
 /// Its height, for the uses now.
@@ -359,7 +396,7 @@ fn content<'a>(
         all = all.push(ui::line(line, format!("{}, {}", said_of.app, said_of.what)));
     }
     if layout.held.is_some() {
-        let held = words.held(crate::notifications::with(|c| c.stack.held_while_sharing()));
+        let held = held_said(words, uses);
         let line = container(said(held.clone(), HELD, MANROPE, FAINT.get()))
             .height(HELD * LINE)
             .align_y(Vertical::Center);
@@ -398,6 +435,14 @@ fn said_of(words: Words, uses: &Uses, line: Line, now: Instant) -> Option<Said> 
         colour,
     };
     match line {
+        Line::Mirror => {
+            let mirror = uses.mirror.as_ref()?;
+            Some(Said {
+                app: words.kind(Kind::Mirror, false).to_owned(),
+                what: words.mirroring_line(mirror),
+                colour,
+            })
+        }
         Line::Microphone(i) => uses.microphone.get(i).map(media),
         Line::Camera(i) => uses.camera.get(i).map(media),
         Line::Transcription => {
@@ -449,6 +494,20 @@ fn icon(words: Words, uses: &Uses, line: Line) -> Draw {
         })
     };
     match line {
+        // Its tile's two screens, on its tint.
+        Line::Mirror => Box::new(move |f, rect| {
+            f.fill(&kit::rounded(rect, ICON_RADIUS), MIRROR_FILL.get());
+            let k = 18.0;
+            crate::in_use::draw::draw_icon(
+                f,
+                Kind::Mirror,
+                Rectangle::new(
+                    Point::new(rect.center_x() - k / 2.0, rect.center_y() - k / 2.0),
+                    Size::new(k, k),
+                ),
+                colour(Kind::Mirror, false),
+            );
+        }),
         Line::Microphone(i) | Line::Camera(i) => {
             let list = if matches!(line, Line::Microphone(_)) {
                 &uses.microphone
@@ -570,6 +629,12 @@ fn button_of<'a>(words: Words, uses: &Uses, target: Target, focus: Option<Target
                 Length::Fill,
             )
         }
+        Target::StopMirror => (
+            word(words.stop_mirroring().to_owned(), MIRROR_STOP.get()),
+            words.stop_mirroring().to_owned(),
+            Role::Button,
+            Length::Fill,
+        ),
     };
     let pressed = button(face)
         .padding(0)
@@ -592,6 +657,7 @@ fn button_of<'a>(words: Words, uses: &Uses, target: Target, focus: Option<Target
                 Target::StopRecording | Target::StopTranscription => {
                     (Some(REC_STOP.get()), REC_HOVER, None)
                 }
+                Target::StopMirror => (Some(MIRROR_STOP_FILL.get()), HOVER, Some(MIRROR_STOP_RING)),
             };
             let lit_fill = !matches!(target, Target::Stop(_)) && lit;
             let background = match (fill, lit_fill && !contrast) {
@@ -656,8 +722,7 @@ fn say(words: Words, uses: &Uses, layout: &Layout, now: Instant, ui: &mut Ui) {
         }
     }
     if layout.held.is_some() {
-        let held = crate::notifications::with(|c| c.stack.held_while_sharing());
-        said.push(words.held(held));
+        said.push(held_said(words, uses));
     }
     for (target, _) in &layout.buttons {
         said.push(match target {
@@ -668,6 +733,7 @@ fn say(words: Words, uses: &Uses, layout: &Layout, now: Instant, ui: &mut Ui) {
             Target::StopTranscription => hocus_words::shell::transcribe::STOP
                 .get(words.lang)
                 .to_owned(),
+            Target::StopMirror => words.stop_mirroring().to_owned(),
         });
     }
     let changed = ui.said.as_ref().is_none_or(|before| {
@@ -729,6 +795,10 @@ fn act(target: Target) {
         }
         Target::StopTranscription => {
             super::send(crate::transcribe::stop().into_iter().collect());
+        }
+        Target::StopMirror => {
+            tracing::info!("mirroring stopped from the bar");
+            super::send(vec![Effect::Mirror(false)]);
         }
     }
 }

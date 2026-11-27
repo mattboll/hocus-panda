@@ -96,6 +96,7 @@ fn shortcut_action(id: &str) -> Option<Action> {
         "move-to-screen-right" => Action::MoveToScreen(1),
         "focus-bar" => Action::FocusBar,
         "overview" => Action::Overview,
+        "every-desktop" => Action::AllDesktops,
         "clipboard" => Action::Clipboard,
         "emoji" => Action::Emoji,
         "volume-up" => Action::Level(LevelKey::VolumeUp),
@@ -113,6 +114,7 @@ fn shortcut_action(id: &str) -> Option<Action> {
         "magnifier-off" => Action::MagnifierOff,
         "screen-reader" => Action::ScreenReader,
         "stop-agents" => Action::StopAgents,
+        "mirror" => Action::Mirror,
         _ => return None,
     })
 }
@@ -209,6 +211,13 @@ impl State {
             on.push("screen-reader".to_owned());
         } else if !self.screen_reader.allowed {
             say("screen-reader", Inert::SessionOnly);
+        }
+        // Mirroring (#931): named for what it does now; nothing to do
+        // with one screen.
+        if self.mirroring() {
+            on.push("mirror".to_owned());
+        } else if self.space.outputs().count() < 2 {
+            say("mirror", Inert::OneScreen);
         }
         if self.config.appearance.high_contrast {
             on.push("high-contrast".to_owned());

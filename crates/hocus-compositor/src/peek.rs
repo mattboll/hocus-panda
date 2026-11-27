@@ -83,12 +83,15 @@ enum What {
     Agent(u64, PeekKind),
     /// The winking panda: screens moved.
     Screens,
+    /// The winking panda: a set of screens never seen lit, « Recopier »
+    /// offered (#931); it stays as long as an agent's, having an action.
+    ScreensNew,
 }
 
 impl What {
     fn stays(self) -> Duration {
         match self {
-            Self::Agent(..) => STAYS,
+            Self::Agent(..) | Self::ScreensNew => STAYS,
             Self::Screens => SCREENS_STAY,
         }
     }
@@ -116,6 +119,9 @@ pub struct Peeks {
     timer: Option<(Duration, RegistrationToken)>,
     /// The secretary's briefing is open: no panda peeks out.
     briefing: bool,
+    /// The new screens' offer that came while the briefing was open: it
+    /// shows as it closes (#931).
+    waiting_new: Option<hocus_link::ScreensNew>,
     /// Peeks told the shell so far, for tests.
     pub told: u64,
 }
@@ -179,13 +185,22 @@ impl Peeks {
     pub fn out(&self) -> Option<(u64, PeekKind)> {
         match self.out?.what {
             What::Agent(id, kind) => Some((id, kind)),
-            What::Screens => None,
+            What::Screens | What::ScreensNew => None,
         }
     }
 
-    /// Whether the winking panda saying screens moved is out.
+    /// Whether the winking panda saying screens moved, or offering to
+    /// mirror them, is out.
     pub fn screens_out(&self) -> bool {
-        self.out.is_some_and(|o| o.what == What::Screens)
+        self.out
+            .is_some_and(|o| matches!(o.what, What::Screens | What::ScreensNew))
+    }
+
+    /// Whether the winking panda offering to mirror the screens is out
+    /// (#931), not going back.
+    pub fn screens_new_out(&self) -> bool {
+        self.out
+            .is_some_and(|o| o.what == What::ScreensNew && o.back.is_none())
     }
 
     /// Since when it is out: its surface's first frame.
@@ -281,11 +296,45 @@ impl State {
     /// winking panda says so for 4 s, unless an agent's panda is out (it
     /// is never replaced), the briefing is open or the session locked.
     pub(crate) fn screens_peek(&mut self, moved: hocus_link::ScreensMoved) {
+        tracing::debug!(
+            gone = moved.gone,
+            windows = moved.apps.len(),
+            "the winking panda says the windows moved"
+        );
+        self.winking_peek(What::Screens, ToShell::ScreensMoved(moved));
+    }
+
+    /// A set of screens never seen lit (#931): the winking panda offers
+    /// « Recopier » for 8 s, as [`State::screens_peek`] says what moved;
+    /// the briefing open, it waits for it to close.
+    pub(crate) fn screens_new_peek(&mut self, new: hocus_link::ScreensNew) {
+        if self.peek.briefing && !self.locked() {
+            tracing::debug!("the briefing is open: the new screens' offer waits");
+            self.peek.waiting_new = Some(new);
+            return;
+        }
+        tracing::debug!(inches = new.inches, "the winking panda offers to mirror");
+        self.winking_peek(What::ScreensNew, ToShell::ScreensNew(new));
+    }
+
+    /// The new screens' offer was answered (« Recopier », or mirroring
+    /// started otherwise): it goes back, and one waiting is dropped.
+    pub(crate) fn peek_screens_new_answered(&mut self) {
+        self.peek.waiting_new = None;
+        if self.peek.screens_new_out() {
+            self.peek_back();
+        }
+    }
+
+    /// The winking panda comes out for `what`, the shell told `told`:
+    /// unless an agent's panda is out (it is never replaced), the briefing
+    /// is open or the session locked.
+    fn winking_peek(&mut self, what: What, told: ToShell) {
         if !self.shell_linked() {
             return;
         }
         if self.locked() {
-            tracing::debug!("locked: the windows moved, nothing is said");
+            tracing::debug!("locked: the screens changed, nothing is said");
             return;
         }
         if self.peek.briefing {
@@ -304,19 +353,14 @@ impl State {
             .peek
             .out
             .and_then(|o| o.since.filter(|_| o.back.is_none()));
-        tracing::debug!(
-            gone = moved.gone,
-            windows = moved.apps.len(),
-            "the winking panda peeks out"
-        );
         self.peek.out = Some(Out {
-            what: What::Screens,
+            what,
             since: showing,
-            stays: showing.map(|_| now + SCREENS_STAY),
+            stays: showing.map(|_| now + what.stays()),
             back: None,
         });
         self.peek.told += 1;
-        self.tell_shell(ToShell::ScreensMoved(moved));
+        self.tell_shell(told);
         self.arm_peek();
         self.redraw = true;
     }
@@ -380,6 +424,13 @@ impl State {
             tracing::debug!("the briefing opens: the panda goes back");
             self.peek_back();
         }
+        // The new screens' offer that waited shows now, its 8 s (#931).
+        if !open
+            && let Some(new) = self.peek.waiting_new.take()
+            && !self.mirroring()
+        {
+            self.screens_new_peek(new);
+        }
     }
 
     /// After the agents changed: a panda whose agent no longer waits, or
@@ -428,6 +479,7 @@ impl State {
     pub(crate) fn peek_shell_gone(&mut self) {
         self.peek.out = None;
         self.peek.briefing = false;
+        self.peek.waiting_new = None;
         self.peek.layers.clear();
         self.arm_peek();
     }

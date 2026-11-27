@@ -33,7 +33,9 @@ flowchart LR
 
 - **The compositor** (`hocuspanda`, crate `hocus-compositor`): the
   session. Window management, rendering (GLES, or pixman), input, the
-  Wayland protocols, XWayland, the lock, captures, screen sharing
+  Wayland protocols (data control for KDE Connect's daemon alone, known
+  by its program: design/bar.md, "The phone"), XWayland, the lock,
+  captures, screen sharing
   (PipeWire), idle, and the D-Bus services of the portal (`ScreenCast`,
   `Settings`) and `org.freedesktop.ScreenSaver`. It starts every other
   program and hands them `HOCUS_SOCKET` and `HOCUS_CONFIG`.
@@ -107,10 +109,11 @@ flowchart LR
 | `hocus-network` | NetworkManager and rfkill | — |
 | `hocus-bluetooth` | BlueZ | — |
 | `hocus-removable` | UDisks2: removable drives followed, mounted, ejected | — |
+| `hocus-phone` | KDE Connect's daemon: paired phones followed and asked; KDE's job view served for its transfers | — |
 
 Only `hocus-compositor` depends on smithay; only the shell and the
 Settings on iced. The library crates draw nothing and run no loop of
-their own: the system ones (`sound`, `network`, `bluetooth`, `removable`, `day`) run
+their own: the system ones (`sound`, `network`, `bluetooth`, `removable`, `phone`, `day`) run
 their work on threads and hand back owned values through a callback or a
 channel. One crate is vendored with a patch, `iced_tiny_skia`
 ([vendor/README.md](../vendor/README.md)).

@@ -3,8 +3,8 @@
 //! no libinput: the swipes are the harness's, as libinput gives them.
 //!
 //! One test per point of the spec: three fingers across with
-//! `swipe-desktops` off, or three fingers that start vertical, reach the
-//! client whole; four fingers up open the launcher past a third of their
+//! `swipe-desktops` off, or three fingers that start up, reach the client
+//! whole (three fingers down open every desktop: `tests/all_desktops.rs`); four fingers up open the launcher past a third of their
 //! travel, or on a flick, and it springs back short of it; four fingers
 //! down close it (with none open, they open the overview: 8.5 A,
 //! `tests/overview.rs`); it follows the fingers (its opacity and size at half
@@ -173,16 +173,16 @@ fn three_finger_swipe_off_leaves_the_desktop_and_reaches_the_client() -> anyhow:
     hp.swipe(3, &[(-30.0, 0.0); 5], 40);
     assert_eq!(hp.desktop(), (0, 0.0), "three fingers moved the desktops");
     assert_eq!(hp.swipes_given(), (1, 5), "the client has it whole");
-    // On, the desktops take a swipe across; one that starts vertical is
-    // the client's for its whole length, from its start, even if it then
-    // goes across.
+    // On, the desktops take a swipe across; one that starts up is the
+    // client's for its whole length, from its start, even if it then goes
+    // across (three fingers down are every desktop's, #944).
     let mut hp = bare(Config::default())?;
     hp.swipe(3, &[(-30.0, 0.0); 5], 40);
     assert_eq!(hp.desktop().0, 1, "three fingers across");
     assert_eq!(hp.swipes_given(), (0, 0));
     hp.swipe(
         3,
-        &[(0.0, 5.0), (0.0, 10.0), (-60.0, 0.0), (-60.0, 0.0)],
+        &[(0.0, -5.0), (0.0, -10.0), (-60.0, 0.0), (-60.0, 0.0)],
         40,
     );
     assert_eq!(hp.desktop().0, 1, "a vertical swipe moved the desktops");

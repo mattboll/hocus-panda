@@ -71,7 +71,7 @@ use crate::{
     ui::{
         self, Around, Later, control,
         notched::Notched,
-        parts::{drawn, gap, moving},
+        parts::{drawn, drawn_lit, gap, moving},
         style::{self, said},
     },
 };
@@ -131,6 +131,11 @@ const GROUP_PAD: (f32, f32, f32) = (8.0, 8.0, 2.0);
 const SMALL_ICON: f32 = 18.0;
 const SMALL_GAP: f32 = 8.0;
 const GROUP_NAME: f32 = 12.0;
+/// A phone's application's header: the phone's icon before its device's
+/// name, and the gaps before it and after it (#957).
+const DEVICE_ICON: f32 = 13.0;
+const DEVICE_GAP: f32 = 8.0;
+const DEVICE_ICON_GAP: f32 = 3.0;
 const TOGGLE: f32 = 22.0;
 const TOGGLE_PAD: f32 = 8.0;
 const TOGGLE_TEXT: f32 = 11.5;
@@ -525,6 +530,14 @@ fn arrows(pressed: &Pressed) -> Option<Msg> {
         Key::Named(Named::ArrowUp) => Some(Msg::Arrow(false)),
         _ => None,
     }
+}
+
+/// The reply field of the line unfolded for it (#957).
+static REPLY: Mutex<Option<crate::field::Entry>> = Mutex::new(None);
+
+fn reply_entry(with: &mut dyn FnMut(&mut crate::field::Entry)) {
+    let mut reply = REPLY.lock().unwrap_or_else(PoisonError::into_inner);
+    with(reply.get_or_insert_with(|| crate::field::Entry::new(crate::field::Kind::Line, 2000)));
 }
 
 /// Its content, as the history is now.
@@ -1225,6 +1238,74 @@ fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
             Point::new(rect.x - shown.rect.x, rect.y - shown.rect.y),
         ));
     }
+    // A phone's reply field, unfolded by its "Répondre" (#957).
+    if let Some(rect) = shown.reply {
+        let field_target = Target::ReplyField(key);
+        let send_target = Target::ReplySend(key);
+        let focused = ui.focus == Some(field_target);
+        let lang = words.lang;
+        let field = crate::ui::field::Field {
+            with: Box::new(reply_entry),
+            style: crate::field::view::Style::one(12.5, MANROPE),
+            placeholder: hocus_words::shell::phone::REPLY.get(lang).to_owned(),
+            look: crate::field::view::Look::of(TEXT.get(), FAINT.get()),
+            focused,
+            left: 10.0,
+            right: 10.0,
+            on_focus: Msg::Focus(field_target),
+            on_took: |_| Msg::Stale,
+        }
+        .view(layout::REPLY_ROW);
+        let boxed = container(field)
+            .width(rect.width - layout::REPLY_ROW - 6.0)
+            .style(move |_| iced::widget::container::Style {
+                background: Some(crate::notifications::draw::REPLY_FILL.get().into()),
+                border: iced::Border {
+                    color: if focused {
+                        crate::notifications::draw::REPLY_RIM_FOCUSED.get()
+                    } else {
+                        crate::notifications::draw::REPLY_RIM.get()
+                    },
+                    width: 1.0,
+                    radius: 8.0.into(),
+                },
+                ..iced::widget::container::Style::default()
+            });
+        layers.push(at(
+            control(
+                boxed,
+                field_target.id(),
+                Role::TextField,
+                hocus_words::shell::phone::REPLY_LINE.get(lang),
+            )
+            .focus(focused, Msg::Focus(field_target), field_target.radius())
+            .activate(Msg::Act(send_target))
+            .typing(),
+            Point::new(rect.x - shown.rect.x, rect.y - shown.rect.y),
+        ));
+        let send = button(drawn_lit(
+            layout::REPLY_ROW,
+            layout::REPLY_ROW,
+            0.0,
+            crate::notifications::draw::draw_send,
+        ))
+        .padding(0)
+        .style(|_, _| style::clear())
+        .on_press(Msg::Act(send_target));
+        layers.push(at(
+            declared(
+                send,
+                send_target,
+                Role::Button,
+                hocus_words::shell::phone::SEND_REPLY.get(lang),
+                ui.focus,
+            ),
+            Point::new(
+                rect.x + rect.width - layout::REPLY_ROW - shown.rect.x,
+                rect.y - shown.rect.y,
+            ),
+        ));
+    }
     let whole = Stack::with_children(layers)
         .width(size.width)
         .height(size.height);
@@ -1241,7 +1322,7 @@ fn item<'a>(shown: &Row, words: Words, ui: &Ui, now: Instant) -> El<'a> {
 /// "Réduire") and its ✕.
 fn group_header<'a>(header: &Header, words: Words, ui: &Ui) -> El<'a> {
     let size = header.rect.size();
-    let name = row![
+    let mut name = row![
         said(header.name.clone(), GROUP_NAME, MANROPE_BOLD, DIM.get()),
         said(
             format!(" · {}", header.count),
@@ -1249,7 +1330,25 @@ fn group_header<'a>(header: &Header, words: Words, ui: &Ui) -> El<'a> {
             MANROPE,
             QUIET.get()
         ),
-    ];
+    ]
+    .align_y(Vertical::Center);
+    // A phone's application: the phone's 13 px icon and its device (#957).
+    if let Some(device) = &header.device {
+        let icon = drawn(DEVICE_ICON, DEVICE_ICON, |f, s| {
+            crate::phone::draw::kind_icon(
+                f,
+                Point::ORIGIN,
+                s.width,
+                crate::phone::Kind::Phone,
+                FAINT.get(),
+            );
+        });
+        name = name
+            .push(gap(DEVICE_GAP))
+            .push(icon)
+            .push(gap(DEVICE_ICON_GAP))
+            .push(said(device.clone(), GROUP_NAME, MANROPE, FAINT.get()));
+    }
     let (label, toggle) = &header.toggle;
     let expand = Target::Expand(header.app);
     let close = Target::CloseApp(header.app);
@@ -1282,7 +1381,7 @@ fn group_header<'a>(header: &Header, words: Words, ui: &Ui) -> El<'a> {
             small(cross(true, FAINT.get()), true, 1.0, close),
             close,
             Role::Button,
-            words.clear_app(&header.name),
+            words.clear_app(&header.whole),
             ui.focus,
         ),
         header.close.position(),
@@ -1644,14 +1743,39 @@ fn act(target: Target, now: Instant, motion: bool) {
                 more = Some((laid.view.y + row.rect.y - ui.scroll + MORE_TOP, key));
                 None
             }
-            Target::Action(key, i) => laid
-                .rows()
-                .find(|r| r.key == key)
-                .and_then(|r| r.actions.get(i))
-                .map(|(action, _)| Said::Act {
-                    key,
-                    action: action.clone(),
-                }),
+            Target::Action(key, i) => {
+                let action = laid
+                    .rows()
+                    .find(|r| r.key == key)
+                    .and_then(|r| r.actions.get(i))
+                    .map(|(action, _)| action.clone())?;
+                // A phone's "Répondre" unfolds its field, or folds it.
+                if action == layout::REPLY_KEY {
+                    let unfolds = folds(|f| {
+                        f.replying = (f.replying != Some(key)).then_some(key);
+                        f.replying.is_some()
+                    });
+                    reply_entry(&mut |entry| entry.clear());
+                    ui.focus = unfolds.then_some(Target::ReplyField(key));
+                    return None;
+                }
+                Some(Said::Act { key, action })
+            }
+            Target::ReplyField(_) => None,
+            Target::ReplySend(key) => {
+                let mut text = String::new();
+                reply_entry(&mut |entry| text = entry.take());
+                if text.trim().is_empty() {
+                    return None;
+                }
+                let id = notifications::with(|c| c.stack.history.get(key).map(|k| k.note.id));
+                if let Some(id) = id {
+                    notifications::reply(id, text, None);
+                }
+                folds(|f| f.replying = None);
+                ui.focus = None;
+                None
+            }
             Target::Expand(app) => {
                 folds(|f| {
                     if !f.expanded.remove(&app) {

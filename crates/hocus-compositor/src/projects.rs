@@ -110,11 +110,32 @@ impl Contents {
 }
 
 /// The desktop a project is: its screen's identity and the desktop's
-/// number, from 1.
+/// number, from 1. The screens linked (#947), it is that number on every
+/// screen, unless it is on its screen alone.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenOn {
     pub screen: String,
     pub desktop: usize,
+    #[serde(default, skip_serializing_if = "Reach::is_every_screen")]
+    pub reach: Reach,
+}
+
+/// Where a project open reaches while the screens are linked (#947).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Reach {
+    /// Its number on every screen.
+    #[default]
+    EveryScreen,
+    /// Its screen alone: another project had its number when the screens
+    /// were linked; it stays so until it closes.
+    OwnScreen,
+}
+
+impl Reach {
+    fn is_every_screen(&self) -> bool {
+        *self == Self::EveryScreen
+    }
 }
 
 /// Who asked for a project: the shell's form, a Settings' line (its
@@ -606,36 +627,40 @@ fn refusal_said(why: &ProjectRefusal) -> String {
 }
 
 impl State {
-    /// The project open on desktop `desktop` (from 0) of `output`.
+    /// The project open on desktop `desktop` (from 0) of `output`: its
+    /// screen's own, else, the screens linked, one of that number on every
+    /// screen (#947).
     pub fn project_on(&self, output: &Output, desktop: usize) -> Option<&Project> {
         let screen = self.screen_key(&output.name());
-        self.projects.list.iter().find(|p| {
-            p.open
+        let on = |p: &&Project| p.open.as_ref().is_some_and(|o| o.desktop == desktop + 1);
+        let mut there = self.projects.list.iter().filter(on);
+        there
+            .clone()
+            .find(|p| p.open.as_ref().is_some_and(|o| o.screen == screen))
+            .or_else(|| there.find(|p| self.project_spans(p)))
+    }
+
+    /// Whether project `p` is its desktop's number on every screen: open,
+    /// the screens linked, and not on its screen alone (#947).
+    pub(crate) fn project_spans(&self, p: &Project) -> bool {
+        self.desktops_linked()
+            && p.open
                 .as_ref()
-                .is_some_and(|o| o.screen == screen && o.desktop == desktop + 1)
-        })
+                .is_some_and(|o| o.reach == Reach::EveryScreen)
     }
 
     /// `output`'s desktops that are projects, as its bar shows them.
     pub fn projects_view(&self, output: &Output) -> Vec<DeskProject> {
-        let screen = self.screen_key(&output.name());
-        let count = self.strip(output).count();
-        let mut out: Vec<DeskProject> = self
-            .projects
-            .list
-            .iter()
-            .filter_map(|p| {
-                let open = p.open.as_ref().filter(|o| o.screen == screen)?;
-                let desktop = open.desktop.checked_sub(1).filter(|d| *d < count)?;
+        (0..self.strip(output).count())
+            .filter_map(|desktop| {
+                let p = self.project_on(output, desktop)?;
                 Some(DeskProject {
                     desktop: u8::try_from(desktop).ok()?,
                     name: p.name.clone(),
                     folder: p.folder.display().to_string(),
                 })
             })
-            .collect();
-        out.sort_by_key(|p| p.desktop);
-        out
+            .collect()
     }
 
     /// Desktop `desktop`'s name on `output` (from 0): its project's, else
@@ -657,27 +682,46 @@ impl State {
     /// minimised ones too, never those on all desktops.
     pub fn project_windows(&self, name: &str) -> Vec<WindowId> {
         let key = link::name_key(name);
-        let Some(open) = self
+        let Some(project) = self
             .projects
             .list
             .iter()
             .find(|p| link::name_key(&p.name) == key)
-            .and_then(|p| p.open.as_ref())
         else {
             return Vec::new();
         };
-        let Some(output) = self
-            .connector_of(&open.screen)
-            .and_then(|c| self.space.outputs().find(|o| o.name() == c).cloned())
-        else {
+        let Some(open) = &project.open else {
             return Vec::new();
         };
-        self.windows_on(&output)
-            .into_iter()
+        self.project_screens(project)
+            .iter()
+            .flat_map(|output| self.windows_on(output))
             .filter(|id| {
                 !self.model.is_everywhere(*id) && self.model.desktop(*id) + 1 == open.desktop
             })
             .collect()
+    }
+
+    /// The screens open project `p` is on: its own first, then, when it
+    /// spans them (#947), the others.
+    pub(crate) fn project_screens(&self, p: &Project) -> Vec<Output> {
+        let Some(open) = &p.open else {
+            return Vec::new();
+        };
+        let own = self
+            .connector_of(&open.screen)
+            .and_then(|c| self.space.outputs().find(|o| o.name() == c).cloned());
+        let mut screens: Vec<Output> = own.into_iter().collect();
+        if self.project_spans(p) {
+            screens.extend(
+                self.space
+                    .outputs()
+                    .filter(|o| !screens.contains(o))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            );
+        }
+        screens
     }
 
     /// The project of window `id`, if it belongs to one.
@@ -772,7 +816,13 @@ impl State {
         let Some(output) = self.space.outputs().find(|o| o.name() == output) else {
             return Err(ProjectRefusal::Desktop);
         };
-        if desktop >= self.strip(output).count() || self.project_on(output, desktop).is_some() {
+        // Linked, the number is to be free on every screen (#947).
+        if desktop >= self.strip(output).count()
+            || self
+                .switching_with(output)
+                .iter()
+                .any(|o| self.project_on(o, desktop).is_some())
+        {
             return Err(ProjectRefusal::Desktop);
         }
         Ok(())
@@ -832,6 +882,7 @@ impl State {
             open: Some(OpenOn {
                 screen: screen.clone(),
                 desktop: asked.desktop + 1,
+                reach: Reach::EveryScreen,
             }),
             away_from: None,
             contents: Vec::new(),
@@ -885,6 +936,113 @@ impl State {
         }
         self.tell_projects();
         self.redraw = true;
+    }
+
+    /// The screens were linked (#947): each project is its number on every
+    /// screen, unless another has that number already: the one of the
+    /// screen under the pointer keeps it, the others stay on their screen
+    /// alone until they close.
+    pub(crate) fn projects_linked(&mut self) {
+        let lead = self
+            .output_under_pointer()
+            .map(|o| self.screen_key(&o.name()));
+        let opened: Vec<Option<(usize, String)>> = self
+            .projects
+            .list
+            .iter()
+            .map(|p| p.open.as_ref().map(|o| (o.desktop, o.screen.clone())))
+            .collect();
+        // Each number's keeper: the project of the screen under the
+        // pointer, else the first.
+        let keeper = |number: usize| {
+            let mut there = opened
+                .iter()
+                .enumerate()
+                .filter_map(|(i, o)| o.as_ref().filter(|o| o.0 == number).map(|o| (i, o)));
+            let first = there.clone().next().map(|(i, _)| i);
+            there
+                .find(|(_, o)| Some(&o.1) == lead.as_ref())
+                .map(|(i, _)| i)
+                .or(first)
+        };
+        let reaches: Vec<Option<Reach>> = opened
+            .iter()
+            .enumerate()
+            .map(|(i, o)| {
+                let (number, _) = o.as_ref()?;
+                Some(if keeper(*number) == Some(i) {
+                    Reach::EveryScreen
+                } else {
+                    tracing::info!(
+                        desktop = number,
+                        "linked: a project stays on its screen alone"
+                    );
+                    Reach::OwnScreen
+                })
+            })
+            .collect();
+        for (project, reach) in self.projects.list.iter_mut().zip(reaches) {
+            if let (Some(open), Some(reach)) = (&mut project.open, reach) {
+                open.reach = reach;
+            }
+        }
+        // Written, and said again wherever a desktop's name shows: every
+        // screen's tiles now name them.
+        self.projects_changed();
+    }
+
+    /// The screens were unlinked (#947): a project that spanned them stays
+    /// on the screen holding most of its windows (ties: the primary); the
+    /// other screens' windows of its number stay open and leave it.
+    pub(crate) fn projects_unlinked(&mut self) {
+        let primary = self.panel_primary();
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        // Where each open project that spanned the screens stays.
+        let stays: Vec<Option<String>> = self
+            .projects
+            .list
+            .iter()
+            .map(|project| {
+                let open = project.open.as_ref()?;
+                if open.reach == Reach::OwnScreen {
+                    return None;
+                }
+                let held = |o: &Output| {
+                    self.windows_on(o)
+                        .into_iter()
+                        .filter(|id| {
+                            !self.model.is_everywhere(*id)
+                                && self.model.desktop(*id) + 1 == open.desktop
+                        })
+                        .count()
+                };
+                outputs
+                    .iter()
+                    .max_by_key(|o| {
+                        (
+                            held(o),
+                            Some(o.name()) == primary,
+                            self.screen_key(&o.name()) == open.screen,
+                        )
+                    })
+                    .map(|o| self.screen_key(&o.name()))
+                    .filter(|s| *s != open.screen)
+            })
+            .collect();
+        for (project, screen) in self.projects.list.iter_mut().zip(stays) {
+            let Some(open) = &mut project.open else {
+                continue;
+            };
+            if let Some(screen) = screen {
+                tracing::info!(
+                    desktop = open.desktop,
+                    "unlinked: a project stays on the screen holding most of its windows"
+                );
+                open.screen = screen;
+            }
+            open.reach = Reach::EveryScreen;
+        }
+        self.projects_changed();
     }
 
     /// The desktops are renumbered on every screen (a desktop taken out,
@@ -965,6 +1123,7 @@ mod tests {
                     open: Some(OpenOn {
                         screen: "BOE NE160QDM 0".into(),
                         desktop: 2,
+                        reach: Reach::EveryScreen,
                     }),
                     away_from: None,
                     contents: Vec::new(),

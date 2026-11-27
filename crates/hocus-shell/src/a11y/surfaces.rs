@@ -93,6 +93,7 @@ pub fn popover_title(bar: &str, item: Item, words: Words) -> String {
             pick("Fenêtres", "Windows")
         }
         Item::WindowMenu(_) => pick("Menu de la fenêtre", "Window's menu"),
+        Item::Phone(key) => crate::phone::row(key).map_or_else(String::new, |r| r.device.name),
         Item::Drive(_) | Item::Eject(_) => {
             hocus_words::shell::removable::DRIVES.get(lang).to_owned()
         }

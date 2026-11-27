@@ -717,7 +717,8 @@ its connector, size and density), its rows "Utiliser cet écran",
 ("Automatique (100 %)", 100 to 200 %; "Comme 2048 × 1280", its density,
 the bar's mini form under 1796 logical), "Fréquence variable (VRR)"
 (inert when not offered), "Rotation" ("Plus tard", inert); TOUS LES
-ÉCRANS with "Écran principal" (Automatique or a screen) and "Recopie";
+ÉCRANS with "Écran principal" (Automatique or a screen) and, with two
+screens on or more, "Deux écrans" (mirroring, below);
 ÉCLAIRAGE NOCTURNE (#436): "Éclairage nocturne" (a switch, "Des couleurs
 plus chaudes le soir, moins de lumière bleue."), "À partir de" (18:00 to
 23:30, every half hour), "Jusqu'à" (05:00 to 09:30) and "Température"
@@ -853,13 +854,33 @@ and the page says so.
 **The search** finds the page's rows by their words and keys
 ("Disposition des écrans", "Identifier les écrans", "Utiliser cet écran",
 "Résolution", "Fréquence", "Échelle" by « hidpi », "Fréquence variable
-(VRR)", "Rotation", "Écran principal", "Recopie" by « miroir »,
+(VRR)", "Rotation", "Écran principal", "Deux écrans" by « miroir », « recopier », « projecteur »,
 "Éclairage nocturne"); they are model settings whose `Places::Page` say
 their keys (`outputs.NAME.scale`) but are not slots of the file.
 
-Not built here (to confirm): **mirroring** (no `mirror` key yet: the
-compositor does not draw one screen's picture on another; the row is
-"Plus tard", inert); a drop that would split three screens or more
+**Mirroring** (#931, windows.md §12 "Mirroring"): the row **"Deux
+écrans"** ("Plusieurs écrans" with three or more), a segmented control
+"Étendre | Recopier", its line "Chaque écran a ses fenêtres.", mirrored
+"L’écran externe 55 pouces montre l’écran du portable."; not shown with
+one screen on. Under it while mirrored, **"Montrer"**: a menu of the
+screens on, the shown one ticked, which swaps it at once. "Écran
+principal" is inert while mirrored, its value the shown screen, its line
+"Celui qui est montré."; a mirror's "Échelle" and VRR are inert, its
+scale's line "Celle de l’écran du portable.". The drawing shows one box
+at the shown screen's size, "1 · 2", "Les deux écrans", "Même image",
+the bar's strip, the other screen an outline 10 px right and 8 px up
+behind it; nothing drags, and under it "Chaque écran garde sa place pour
+la suite.". The choice is the compositor's, kept with the set of screens
+in its state file, not config.toml: the page asks over its line, `mirror
+IDENTITY` or `extend`, and the screens' JSON says `"mirrors": "eDP-1"`
+for a mirror and the set's `"shown"`. Toasted "Recopie : l’écran du
+portable sur l’écran externe 55 pouces" or "Recopie arrêtée", with
+"Annuler" and `Ctrl+Z`.
+
+"Identifier" mirrored says "1 · 2", "Les deux écrans · Même image" on
+the screen shown, so on both.
+
+Not built here (to confirm): a drop that would split three screens or more
 (only two are drawn against each other); the mockup's strip of the day
 under the night light's rows (the hours it warms drawn on a sky), left
 out until the maintainer asks for it.
@@ -1049,7 +1070,11 @@ nine is one folded row that unfolds.
   `desktop-left` `swipe:3:right`, `desktop-right` `swipe:3:left` (the
   strip follows the fingers: right brings the desktop on the left, as
   before), `launcher` `swipe:4:up`, `overview` `corner:top-left` and
-  `swipe:4:down`. The older `[touchpad] swipe-desktops`, `swipe-launcher`
+  `swipe:4:down`, `all-desktops` `corner:top-right` and `swipe:3:down`
+  (#944; three fingers up close every desktop while it shows, built in).
+  A default gives way to a line the file writes: a corner or a swipe a
+  written line names is that action's, whatever the order. The older
+  `[touchpad] swipe-desktops` (three fingers down too), `swipe-launcher`
   and `[overview] hot-corner` are still read, no longer written: false,
   each takes its defaults away from an action whose line the file does
   not write; "Rétablir" then writes the line whole.
@@ -1061,17 +1086,19 @@ nine is one folded row that unfolds.
   holds is greyed with its name, and picked asks first in the picker's
   amber box ("3 doigts ↑ sert déjà à « X ». Le donner à « Y » le lui
   enlève.", Remplacer writing both lines as one change, or Annuler);
-  this action's own says "déjà ici"; the bar's own corner (the top one
-  on its side) says "la barre"; on a touchpad sensing three fingers the
+  this action's own says "déjà ici"; the bar's own corner (the top-left
+  one with the bar on the left; the top-right one is never the bar's,
+  #944) says "la barre"; on a touchpad sensing three fingers the
   four-finger ones say "pas sur ce pavé". `Esc` closes the box, then the
   picker. The search finds them ("3 doigts", "coin", "haut"); the count
   line adds "N gestes et coins"; "Rétablir" and "Tout rétablir" bring
   them back with the keys.
 - **Elsewhere**: Souris et pavé tactile's gestures group says what they
-  do ("3 doigts ← → : Bureau de droite, Bureau de gauche") and Bureaux
+  do, a line a finger count and an axis ("3 doigts ← → : Bureau de
+  droite, Bureau de gauche", "3 doigts ↓ : Tous les bureaux") and Bureaux
   et fenêtres' overview group what the corners do ("Coin ◤ : Vue
-  d’ensemble"), each with "Changer dans les raccourcis ›", which opens
-  the sub-page.
+  d’ensemble", "Coin ◥ : Tous les bureaux"), each with "Changer dans les
+  raccourcis ›", which opens the sub-page.
 - **The compositor**: a swipe with a binding decides as before
   (`gestures.rs`); the desktops follow when the fingers go the strip's
   way, the launcher along its swipe's way (back the other way while
@@ -1079,7 +1106,8 @@ nine is one folded row that unfolds.
   fingers lift, past a third of the launcher's travel; a swipe no action
   takes is the application's. The corners (`hot_corner.rs`) keep #727's
   rules for each corner. Tests: `shortcuts::tests`, `tests/gestures.rs`,
-  `tests/overview.rs`, `tests/settings_keyboard.rs`.
+  `tests/overview.rs`, `tests/all_desktops.rs`,
+  `tests/settings_keyboard.rs`.
 
 **The compositor's side.** `reload.rs` follows `[shortcuts]` and
 `[keyboard]` too: the new shortcuts at once; new layouts or options make
@@ -1843,7 +1871,8 @@ row.
 
 | Group | Row | Control | Key |
 |---|---|---|---|
-| BUREAUX ("4 bureaux par écran") | Nombre de bureaux | − the number + (32 × 32; − at 1 and + at 9 at 45 %, inert) | `[desktops] count` |
+| BUREAUX ("4 bureaux par écran") | Nombre de bureaux, "Sur chaque écran, de 1 à 9." | − the number + (32 × 32; − at 1 and + at 9 at 45 %, inert) | `[desktops] count` |
+| | Changer de bureau (#947), "Super+1 met chaque écran sur son bureau 1." (per screen: "Super+1 change l’écran sous le pointeur.") | segmented: Tous les écrans, Chaque écran (6.3's words and control) | `[desktops] per-screen` (`false`: every screen together, the default) |
 | | Leurs noms | a chip per desktop (its number, its name or "Bureau N" faint, a ✕ but with one left; its tooltip "Travail · 3 fenêtres" when the compositor says them), then "+ Ajouter un bureau" (gone at 9) | `[desktops] names` |
 | DÉPLACER ET ANCRER | Déplacer de n'importe où | menu: Alt + glisser, Super + glisser, Aucune touche | `[windows] move-modifier` |
 | | Redimensionner de n'importe où | menu: Super + clic droit glissé, Alt + clic droit glissé, Aucune touche | `[windows] resize-modifier` |
@@ -1855,6 +1884,13 @@ row.
 | VUE D'ENSEMBLE | Coins de l’écran | what each corner does, a link to the shortcuts (#893) | `[shortcuts]`' `corner:` tokens |
 | DESSINER SUR L'ÉCRAN | Dessiner sur l'écran | switch | `[ink] enabled` |
 
+- **Changer de bureau** (#947, windows.md §12): shown with one screen
+  too (the choice holds for the next one plugged); written at once,
+  followed live by the compositor, its toast "Les écrans changent de
+  bureau ensemble" or "Chaque écran change ses bureaux", "Annuler" and
+  `Ctrl+Z` writing the other back. Found by "ensemble", "lier",
+  "tous les écrans", "multi-écran", "synchroniser" (together, linked,
+  all screens, span, multi-monitor).
 - **Under the title**: "Les raccourcis des fenêtres et des bureaux se
   règlent dans Clavier et raccourcis ›", which opens 6.8 with its
   "Raccourcis du bureau" row lit.

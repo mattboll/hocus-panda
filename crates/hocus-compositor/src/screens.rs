@@ -105,12 +105,18 @@ impl State {
         self.perf
             .event(hocus_perf::EventKind::ScreenUnplugged, output.name());
         self.display_removed(output);
+        // The screen shown going stops mirroring for now (#931): the
+        // others take its windows.
+        self.mirror_unplugged(output);
         self.output_gone(output, true);
         // Also when it had no place on the desktop, which `output_gone`
         // then leaves as it is: nothing may be left on it.
         self.leave_output(output);
         self.close_layers_on(output);
-        self.retire_output_global(global);
+        // A mirror's was retired as it began to mirror (#931).
+        if let Some(global) = crate::mirror::take_global(output, Some(global)) {
+            self.retire_output_global(global);
+        }
     }
 
     /// `output` leaves the desktop: a drag or a resize under way ends, and
@@ -130,6 +136,8 @@ impl State {
             return;
         };
         self.end_on_output(output);
+        // Every desktop closes at once (#944).
+        self.grid_screens_changed();
         self.share_output_gone(&name);
         self.record_output_gone(&name);
         self.ink.output_gone(&name);
@@ -285,7 +293,7 @@ impl State {
 
     /// `global`, an unplugged screen's `wl_output`, goes: clients are told
     /// at once, and it is removed a while later.
-    fn retire_output_global(&mut self, global: GlobalId) {
+    pub(crate) fn retire_output_global(&mut self, global: GlobalId) {
         self.display_handle.disable_global::<State>(global.clone());
         let later = global.clone();
         let inserted = self.loop_handle.insert_source(
@@ -394,6 +402,10 @@ impl State {
         ) else {
             return;
         };
+        // Linked, it shows the desktop the others show (#947), before
+        // its windows come back to theirs.
+        self.grid_screens_changed();
+        self.desktops_join(output);
         // Projects that followed their windows away come back with them.
         self.projects_screen_back(&key);
         let returning: Vec<WindowId> = self
@@ -569,15 +581,7 @@ impl State {
             Some(d) if desktops.len() == 1 => d + 1,
             _ => 0,
         };
-        let mm = output
-            .user_data()
-            .get::<crate::displays::Facts>()
-            .map_or((0, 0), |f| f.millimetres);
-        let inches = if mm.0 > 0 && mm.1 > 0 {
-            ((f64::from(mm.0).powi(2) + f64::from(mm.1).powi(2)).sqrt() / 25.4).round() as u32
-        } else {
-            0
-        };
+        let inches = crate::mirror::inches_of(output);
         self.screens_peek(hocus_link::ScreensMoved {
             gone,
             built_in: crate::away::is_internal(output),
@@ -664,9 +668,8 @@ impl State {
         {
             self.switching.out = None;
         }
-        if self.gestures.swiping.as_ref() == Some(output) {
-            self.gestures.swiping = None;
-        }
+        // A swipe goes on with the screens left.
+        self.gestures.swiping.retain(|o| o != output);
         if self
             .radial_menu
             .open

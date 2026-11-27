@@ -643,7 +643,7 @@ fn searching_hidpi_and_miroir_finds_the_scale_and_mirroring() -> anyhow::Result<
         return Ok(());
     };
     bed.open()?;
-    for (word, found) in [("hidpi", "Échelle"), ("miroir", "Recopie")] {
+    for (word, found) in [("hidpi", "Échelle"), ("miroir", "Deux écrans")] {
         chord(&mut bed.hp, &[KEY_LEFTCTRL, KEY_F]);
         bed.shows(|s| s["focus"] == "search")?;
         wait(&mut bed.hp, Duration::from_millis(100))?;
@@ -1296,6 +1296,171 @@ fn screenshots_of_identifier() -> anyhow::Result<()> {
             .flat_map(|p| [p[2], p[1], p[0], 255])
             .collect();
         let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+        let path = out.join(name);
+        image.save(&path)?;
+        eprintln!("{}", path.display());
+    }
+    Ok(())
+}
+
+/// The laptop (2560 × 1600 at 1.25, its built-in panel) and a 55-inch TV
+/// (1920 × 1080), for mirroring (#931).
+fn mirror_bed() -> anyhow::Result<Option<Bed>> {
+    let Some(mut bed) = Bed::start_on(FILE, &["2560x1600@1.25:302x189mm", "1920x1080:1218x685mm"])?
+    else {
+        return Ok(None);
+    };
+    bed.hp.set_internal(LAPTOP);
+    Ok(Some(bed))
+}
+
+/// Acceptance 17: "Recopier" asks the compositor to mirror the laptop's
+/// screen; the drawing shows one box, "1 · 2 · Les deux écrans";
+/// "Montrer" says "Écran du portable"; the toast's "Annuler" extends
+/// again.
+#[test]
+fn recopier_mirrors_and_annuler_extends_again() -> anyhow::Result<()> {
+    let Some(mut bed) = mirror_bed()? else {
+        return Ok(());
+    };
+    let shown = bed.open()?;
+    assert_eq!(shown["screens"]["mirror"]["value"], "extend");
+    bed.reveal("segment:screens.mirror:1")?;
+    bed.click("segment:screens.mirror:1")?;
+    let mirrored = bed.hp.dispatch_until(WAIT, |hp| hp.mirroring().is_some())?;
+    anyhow::ensure!(mirrored, "not mirrored: {}", bed.plain());
+    assert_eq!(
+        bed.hp.mirroring(),
+        Some((LAPTOP.to_owned(), vec![EXTERNAL.to_owned()]))
+    );
+    let shown = bed.shows(|s| {
+        s["screens"]["mirror"]["value"] == "mirror"
+            && s["screens"]["drawn"]
+                .as_array()
+                .is_some_and(|d| d.len() == 2)
+    })?;
+    assert_eq!(shown["screens"]["mirror"]["show"], "Écran du portable");
+    let both = drawn(&shown, LAPTOP);
+    assert_eq!(both["number"], "1 · 2");
+    assert_eq!(both["title"], "Les deux écrans");
+    assert_eq!(both["line"], "Même image");
+    assert_eq!(
+        shown["toast"],
+        "Recopie : l’écran du portable sur l’écran externe 55 pouces"
+    );
+    assert_eq!(shown["toast_action"], "undo");
+    bed.click("toast-action")?;
+    let extended = bed.hp.dispatch_until(WAIT, |hp| hp.mirroring().is_none())?;
+    anyhow::ensure!(extended, "still mirrored: {}", bed.plain());
+    bed.shows(|s| s["screens"]["mirror"]["value"] == "extend")?;
+    Ok(())
+}
+
+/// Acceptance 18: "Montrer" picks the TV: the laptop shows its picture,
+/// and the bar is on the TV.
+#[test]
+fn montrer_picks_the_tv() -> anyhow::Result<()> {
+    let Some(mut bed) = mirror_bed()? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.hp.mirror(true);
+    bed.shows(|s| s["screens"]["mirror"]["value"] == "mirror")?;
+    bed.reveal("control:screens.mirror.show")?;
+    // Écran du portable, then the TV.
+    bed.choose("screens.mirror.show", 1)?;
+    let swapped = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.mirroring() == Some((EXTERNAL.to_owned(), vec![LAPTOP.to_owned()]))
+    })?;
+    anyhow::ensure!(swapped, "{:?}: {}", bed.hp.mirroring(), bed.plain());
+    assert_eq!(
+        bed.hp.mirror_fitted(LAPTOP),
+        Some((EXTERNAL.to_owned(), Rect::new(0, 80, 2560, 1440)))
+    );
+    let primary = bed.hp.state().displays_json()["outputs"]
+        .as_array()
+        .and_then(|o| o.iter().find(|o| o["primary"] == true))
+        .and_then(|o| o["name"].as_str().map(ToOwned::to_owned));
+    assert_eq!(primary.as_deref(), Some(EXTERNAL), "the bar on the TV");
+    bed.shows(|s| s["screens"]["mirror"]["show"] == "Écran externe 55 pouces")?;
+    Ok(())
+}
+
+/// Acceptance 19: one screen alone: no "Deux écrans".
+#[test]
+fn one_screen_has_no_mirroring_row() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::start_on(FILE, &["2560x1600@1.25:302x189mm"])? else {
+        return Ok(());
+    };
+    bed.hp.set_internal(LAPTOP);
+    let argv = vec![bed.script.display().to_string(), "screens".to_owned()];
+    bed.hp.launch(hocus_link::Launch {
+        id: APP_ID.to_owned(),
+        terminal: false,
+        dir: String::new(),
+        argv,
+    });
+    let shown = bed.shows(|s| {
+        s["file"] == "saved"
+            && s["screens"]["drawn"]
+                .as_array()
+                .is_some_and(|d| d.len() == 1)
+    })?;
+    assert!(shown["screens"]["mirror"].is_null(), "{shown}");
+    let places = bed.places_with("row:screens.primary")?;
+    assert!(places.get("row:screens.mirror").is_none(), "{places}");
+    Ok(())
+}
+
+/// The maintainer's screenshot, into `HOCUS_SHOTS`: Écrans while the
+/// laptop is mirrored on a 55-inch TV.
+#[test]
+#[ignore = "screenshots for the maintainer: HOCUS_SHOTS=DIR"]
+fn screenshot_of_the_page_while_mirrored() -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS").map(PathBuf::from) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(&out)?;
+    let Some(mut bed) = mirror_bed()? else {
+        return Ok(());
+    };
+    bed.open()?;
+    bed.hp.mirror(true);
+    bed.shows(|s| s["screens"]["mirror"]["value"] == "mirror")?;
+    for (id, name) in [
+        ("row:screens.arrangement", "settings-mirrored-top.png"),
+        ("row:screens.mirror", "settings-mirrored-row.png"),
+    ] {
+        bed.reveal(id)?;
+        bed.hp.pointer_move(5.0, 5.0);
+        let mut last = bed.hp.window_commits();
+        let mut still = 0;
+        for _ in 0..40 {
+            if still >= 5 {
+                break;
+            }
+            wait(&mut bed.hp, Duration::from_millis(100))?;
+            let now = bed.hp.window_commits();
+            still = if now == last { still + 1 } else { 0 };
+            last = now;
+        }
+        let window = bed.window()?;
+        // The laptop's screen, at 1.25.
+        let (w, h, px) = bed.hp.screenshot(0)?;
+        let rgba: Vec<u8> = px
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], 255])
+            .collect();
+        let image = image::RgbaImage::from_raw(w as u32, h as u32, rgba).context("image")?;
+        let k = 1.25;
+        let x = (f64::from(window.x) * k) as u32;
+        let y = (f64::from(window.y) * k) as u32;
+        let cw = ((f64::from(window.width) * k) as u32).min(w as u32 - x);
+        let ch = ((f64::from(window.height) * k) as u32).min(h as u32 - y);
+        let image = image::imageops::crop_imm(&image, x, y, cw, ch).to_image();
         let path = out.join(name);
         image.save(&path)?;
         eprintln!("{}", path.display());

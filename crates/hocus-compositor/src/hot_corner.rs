@@ -2,14 +2,16 @@
 //! §12b): the pointer held in a screen's corner for [`DWELL`] runs the
 //! action `[shortcuts]` binds to that corner (`corner:top-left`,
 //! `hocus_config::triggers`), by default the overview at the top left, as
-//! `Super+W` does.
+//! `Super+W` does, and every desktop at the top right (#944), as
+//! `Super+Shift+W` does.
 //!
 //! Once per entry: the corner is spent until the pointer has gone
 //! [`REARM`] px away from it; at the session's start the pointer only
 //! resting at a corner (or moved there in place) is no entry, until it
 //! has been that far away from every corner once. Only where the pointer
-//! stops: not the bar's own corner (the top one on its side, on a screen
-//! with a bar: there the pointer brings the bar in front), nor where
+//! stops: not the bar's own corner (the top-left one with the bar on the
+//! left, on a screen with a bar: there the pointer brings the bar in
+//! front; the top-right one is above the bar's edge, and acts), nor where
 //! another screen touches the corner (the pointer passes through it); not
 //! while a button is held (a window dragged, a selection), nor over a
 //! fullscreen window or the launcher; never a corner no action takes. The

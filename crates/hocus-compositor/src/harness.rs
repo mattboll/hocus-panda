@@ -76,9 +76,36 @@ pub type OverviewWindow = (Option<String>, (f64, f64, f64, f64));
 /// over (screen, desktop).
 pub type OverviewDrag = (Option<String>, Option<(String, usize)>);
 
+/// A desktop of every desktop's grid (#944): its screen, its number
+/// (from 0), its picture (x, y, width, height), global.
+pub type GridDesktop = (String, usize, (f64, f64, f64, f64));
+/// A window of every desktop's grid: its app id, its screen, its desktop
+/// (from 0), its picture (x, y, width, height), global.
+pub type GridWindow = (Option<String>, String, usize, (f64, f64, f64, f64));
+
 /// A project as a test sees it: its name, its folder, and, open, its
 /// screen's connector and its desktop (from 0).
 pub type ProjectSeen = (String, std::path::PathBuf, Option<(String, usize)>);
+
+/// A bar's tile as a test sees it: its bar, its screen, its desktop (from
+/// 0), and its place (x, y, width, height), global.
+pub type TileSeen = (String, String, usize, (f64, f64, f64, f64));
+
+/// How a screen's strip of desktops looks at a moment (#947).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StripLook {
+    pub output: String,
+    /// The desktop it shows or goes to, from 0.
+    pub current: usize,
+    /// Where the strip is, in desktops from 0.
+    pub position: f64,
+    /// How much its dots show, 0 to 1.
+    pub dots: f32,
+    /// Whether it slides or fades.
+    pub moving: bool,
+    /// The project of the desktop it shows, whose pill is under the dots.
+    pub project: Option<String>,
+}
 
 /// A browser window's tabs a closed project keeps: the one shown (from
 /// 1) and their addresses (the tests).
@@ -2184,6 +2211,29 @@ impl Headless {
             .collect()
     }
 
+    /// How each output's strip looks now (#947): where it is (in desktops
+    /// from 0), how much its dots show, and the project whose pill shows
+    /// under them.
+    pub fn strip_looks(&self) -> Vec<StripLook> {
+        let state = &self.app.state;
+        let now = state.now();
+        state
+            .space
+            .outputs()
+            .map(|o| {
+                let strip = state.strip(o);
+                StripLook {
+                    output: o.name(),
+                    current: strip.current(),
+                    position: strip.position(now),
+                    dots: strip.dots_alpha(now),
+                    moving: strip.moves_until().is_some(),
+                    project: state.project_on(o, strip.current()).map(|p| p.name.clone()),
+                }
+            })
+            .collect()
+    }
+
     /// The desktops' names as the compositor has them (6.14).
     pub fn desktop_names(&self) -> Vec<String> {
         self.app.state.config.desktops.names.clone()
@@ -2301,6 +2351,107 @@ impl Headless {
             .get(&drag.window)
             .and_then(|m| crate::windows::app_id(&m.window));
         Some((app, drag.over.clone()))
+    }
+
+    /// Every desktop at once (#944): `Some(true)` showing, `Some(false)`
+    /// zooming back in, `None` gone (or the overview's windows showing).
+    pub fn all_desktops(&self) -> Option<bool> {
+        let overview = self.app.state.overview.as_ref()?;
+        overview.grid.as_ref().map(|_| overview.open())
+    }
+
+    /// Every desktop's places, each screen's, in reading order.
+    pub fn grid_desktops(&self) -> Vec<GridDesktop> {
+        self.app
+            .state
+            .grid_screens()
+            .into_iter()
+            .flat_map(|s| {
+                let name = s.output.name();
+                s.places
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(d, a)| (name.clone(), d, (a.x, a.y, a.w, a.h)))
+            })
+            .collect()
+    }
+
+    /// Every desktop's windows, at rest, back to front on each desktop.
+    pub fn grid_windows(&self) -> Vec<GridWindow> {
+        let state = &self.app.state;
+        let mut out = Vec::new();
+        for screen in state.grid_screens() {
+            for desktop in 0..screen.places.len() {
+                for id in state.grid_windows(&screen.output, desktop) {
+                    let Some(a) = state.grid_window_rect(&screen, desktop, id) else {
+                        continue;
+                    };
+                    let app = state
+                        .windows
+                        .get(&id)
+                        .and_then(|m| crate::windows::app_id(&m.window));
+                    out.push((app, screen.output.name(), desktop, (a.x, a.y, a.w, a.h)));
+                }
+            }
+        }
+        out
+    }
+
+    /// The desktop the pointer lights in every desktop: its screen and
+    /// number (from 0).
+    pub fn grid_hover(&self) -> Option<(String, usize)> {
+        self.app
+            .state
+            .overview
+            .as_ref()?
+            .grid
+            .as_ref()?
+            .hover
+            .clone()
+    }
+
+    /// The keyboard's selection in every desktop.
+    pub fn grid_selection(&self) -> Option<crate::overview::grid::Selection> {
+        Some(
+            self.app
+                .state
+                .overview
+                .as_ref()?
+                .grid
+                .as_ref()?
+                .selection
+                .clone(),
+        )
+    }
+
+    /// The window carried in every desktop: its app id, the desktop it is
+    /// over (screen, number).
+    pub fn grid_carry(&self) -> Option<OverviewDrag> {
+        let state = &self.app.state;
+        let carry = state.overview.as_ref()?.grid.as_ref()?.carry.as_ref()?;
+        let app = state
+            .windows
+            .get(&carry.window)
+            .and_then(|m| crate::windows::app_id(&m.window));
+        Some((app, carry.over.clone()))
+    }
+
+    /// What desktop `desktop` (from 0) of screen `output`'s label says.
+    pub fn grid_label(&self, output: &str, desktop: usize) -> Option<crate::overview::grid::Label> {
+        let state = &self.app.state;
+        let output = state.space.outputs().find(|o| o.name() == output)?;
+        Some(state.grid_label(output, desktop))
+    }
+
+    /// The screen whose bar the pointer pushed against its edge brought,
+    /// or is bringing, in front (#519), whatever the overview does.
+    pub fn bar_pushed(&self) -> Option<String> {
+        match &self.app.state.panel.front {
+            crate::front::Front::Pushed { output, .. } | crate::front::Front::Raised { output } => {
+                Some(output.clone())
+            }
+            _ => None,
+        }
     }
 
     /// The projects (docs/design/projects.md): each one's name, folder,
@@ -2897,6 +3048,24 @@ impl Headless {
             .collect()
     }
 
+    /// The tiles the bars said (8.5 B): bar, screen, desktop, and the
+    /// tile's place (x, y, width, height), global.
+    pub fn desk_tile_rects(&self) -> Vec<TileSeen> {
+        self.app
+            .state
+            .tile_rects()
+            .into_iter()
+            .map(|(o, r)| {
+                (
+                    o.bar,
+                    o.output,
+                    o.desktop,
+                    (r.loc.x, r.loc.y, r.size.w, r.size.h),
+                )
+            })
+            .collect()
+    }
+
     /// The pointer as a session finds it at its start, never moved by the
     /// user: screens lit from now on bring it to the primary's middle.
     pub fn pointer_unplaced(&mut self) {
@@ -2985,6 +3154,50 @@ impl Headless {
     /// Whether the winking panda saying screens moved is out.
     pub fn screens_peek_out(&self) -> bool {
         self.app.state.peek.screens_out()
+    }
+
+    /// Whether the winking panda offering to mirror a set of screens
+    /// never seen is out (#931).
+    pub fn screens_new_out(&self) -> bool {
+        self.app.state.peek.screens_new_out()
+    }
+
+    /// Mirroring asked for (`on`), or the screens extended again, as the
+    /// new screens' bubble's « Recopier » and the sign's « Arrêter la
+    /// recopie » ask it (#931).
+    pub fn mirror(&mut self, on: bool) {
+        self.app.state.mirror_asked(on);
+    }
+
+    /// The Settings' `mirror IDENTITY` (`Some`) or `extend` (#931).
+    pub fn mirror_from_settings(&mut self, shown: Option<&str>) -> Result<(), String> {
+        self.app.state.mirror_from_settings(shown)
+    }
+
+    /// Mirroring now: the screen shown and the mirrors, by name.
+    pub fn mirroring(&self) -> Option<(String, Vec<String>)> {
+        let state = &self.app.state;
+        let shown = state.mirror_shown()?.name();
+        let mirrors = state
+            .displays
+            .outputs
+            .iter()
+            .filter(|o| state.is_mirror(o))
+            .map(Output::name)
+            .collect();
+        Some((shown, mirrors))
+    }
+
+    /// Where mirror `name` draws the screen it shows: that screen, and the
+    /// picture's place on the mirror (pixels).
+    pub fn mirror_fitted(&self, name: &str) -> Option<(String, Rect)> {
+        let (shown, at) = self.app.state.mirror_fitted(name)?;
+        Some((shown, Rect::new(at.loc.x, at.loc.y, at.size.w, at.size.h)))
+    }
+
+    /// The screens as an MCP agent's `list_outputs` lists them.
+    pub fn mcp_outputs(&self) -> Vec<serde_json::Value> {
+        self.app.state.mcp_outputs()
     }
 
     /// Whether the panda out goes back.

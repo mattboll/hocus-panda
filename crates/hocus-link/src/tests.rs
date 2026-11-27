@@ -98,6 +98,17 @@ fn to_shell() -> Vec<ToShell> {
             bar: "eDP-1".into(),
             over: None,
         },
+        ToShell::FileDrag {
+            bar: "eDP-1".into(),
+            at: Some((97, 41)),
+        },
+        ToShell::FileDrag {
+            bar: "eDP-1".into(),
+            at: None,
+        },
+        ToShell::FileDropped {
+            bar: "eDP-1".into(),
+        },
         ToShell::Emoji {
             output: "eDP-1".into(),
             scale: 180,
@@ -461,6 +472,23 @@ fn to_shell() -> Vec<ToShell> {
             desktop: 0,
             apps: vec![],
         }),
+        ToShell::ScreensNew(ScreensNew {
+            built_in: false,
+            inches: 55,
+        }),
+        ToShell::Mirror(Some(MirrorShown {
+            shown: MirrorScreen {
+                output: "eDP-1".into(),
+                built_in: true,
+                inches: 14,
+            },
+            mirrors: vec![MirrorScreen {
+                output: "HDMI-A-1".into(),
+                built_in: false,
+                inches: 55,
+            }],
+        })),
+        ToShell::Mirror(None),
         ToShell::AgentPandas(true),
         ToShell::AgentPandas(false),
         ToShell::SoundBoost(true),
@@ -975,6 +1003,8 @@ fn to_compositor() -> Vec<ToCompositor> {
         ToCompositor::A11yEnd,
         ToCompositor::GoToAgent { id: 7, row: None },
         ToCompositor::PeekClose,
+        ToCompositor::Mirror(true),
+        ToCompositor::Mirror(false),
         ToCompositor::Ring(Row {
             output: "eDP-1".into(),
             x: -190,
@@ -1656,6 +1686,14 @@ fn card_window(id: u64, terminal: Option<&str>) -> CardWindow {
             session: "3f6c2a1e".into(),
             folder: "/home/alex/github/hocus-panda".into(),
             resume: Some("claude --resume 3f6c2a1e".into()),
+        }),
+        screen: (id == 5).then(|| DeskScreen {
+            output: "DP-1".into(),
+            width: 3440,
+            height: 1440,
+            built_in: false,
+            inches: 34,
+            number: 2,
         }),
     }
 }

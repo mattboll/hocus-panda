@@ -757,6 +757,34 @@ fn its_screen_unplugged_stops_and_saves_it() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Mirroring's acceptance 23 (#931): a recording of the screen that
+/// becomes a mirror stops and saves, as for a screen unplugged.
+#[test]
+fn its_screen_mirroring_another_stops_and_saves_it() -> anyhow::Result<()> {
+    if !ready() {
+        return Ok(());
+    }
+    let mut bed = Bed::start_on(&["1280x800", "1024x768"], false)?;
+    let outputs = bed.hp.outputs();
+    let (name, second) = outputs.get(1).context("two screens")?.clone();
+    bed.hp.pointer_move(
+        f64::from(second.x + second.width / 2),
+        f64::from(second.y + second.height / 2),
+    );
+    bed.choose(CaptureMode::Screen, false, false)?;
+    bed.start_recording()?;
+    let info = bed.hp.recording().context("recording")?;
+    assert_eq!(info.source, RecordSource::Screen(name.clone()));
+    bed.record_for(Duration::from_millis(500))?;
+    bed.hp.mirror(true);
+    let mirrors = bed.hp.mirroring().map(|(_, m)| m).unwrap_or_default();
+    assert_eq!(mirrors, vec![name.clone()]);
+    assert!(bed.hp.recording().is_none());
+    let file = bed.saved()?;
+    assert_eq!(probe(&file)?.streams[0].2, 1024);
+    Ok(())
+}
+
 #[test]
 fn deleting_it_from_its_thumbnail_removes_its_file() -> anyhow::Result<()> {
     if !ready() {

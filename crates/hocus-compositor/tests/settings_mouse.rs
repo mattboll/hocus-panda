@@ -690,11 +690,13 @@ fn the_gestures_group_sums_up_what_the_gestures_do() -> anyhow::Result<()> {
         row(&shown, "touchpad.left-to-applications")["value"],
         "Toujours"
     );
-    // What the shortcuts bind, a line a finger count (#893).
+    // What the shortcuts bind, a line a finger count and an axis (#893),
+    // three fingers down every desktop (#944).
     assert_eq!(
         shown["summaries"]["gestures"],
         serde_json::json!([
             "3 doigts ← → : Bureau de droite, Bureau de gauche",
+            "3 doigts ↓ : Tous les bureaux",
             "4 doigts ↑ ↓ : Ouvrir le lanceur, Vue d’ensemble"
         ])
     );

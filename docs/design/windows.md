@@ -597,20 +597,58 @@ down as `Super+↑` and `Super+H`, left and right as the desktops' strip.
 
 ## 12. Virtual desktops
 
-- **Per screen**: each output has its own desktops and switches alone
-  (first build's decision, kept; confirmed for 8.4, issue #420: a window
-  kept on one screen all day stays put while another switches). 4
-  desktops by default (1 to 9), `[desktops] count` and `names` the same on
-  every screen.
+- **Each screen has its own strip** of desktops, numbered 1 to `count`:
+  4 by default (1 to 9), `[desktops] count` and `names` the same on every
+  screen.
+- **Linked, by default** (#947, `[desktops] per-screen = false`): the
+  screens switch together. Whatever switches desktops puts every screen
+  on the same number, so that desktop N is "desktop N of every screen".
+  No screen is kept out of the link: a window "on all desktops" (#723)
+  is how a window stays in sight on one screen whatever the switches
+  (the #420 case, a chat kept on the laptop all day). With one screen
+  nothing differs.
+- **Per screen** (`per-screen = true`, #420 as built): the screen under
+  the pointer switches alone; the tiles switch their row's screen.
 - Switching: `Super+1…4`, `Super+Ctrl+←/→`, a three-finger horizontal
   swipe on a touchpad (following the fingers: right brings the desktop on
   the left; `swipe:3:right` and `swipe:3:left` in `[shortcuts]`
   `desktop-left` and `desktop-right`, set in the Settings' shortcuts,
-  settings.md "Gestures and corners"), and the bar's tiles (a
-  click, the wheel; bar.md §4.4). Keys and swipes act on the screen under
-  the pointer, the tiles on their row's screen (the bar on the primary
-  screen shows a row per screen, bar.md §4.4). The dots show on the
-  screen that switches only.
+  settings.md "Gestures and corners"), the bar's tiles (a click, `Enter`,
+  the wheel, on any screen's row; bar.md §4.4), the overview's
+  thumbnails, an agent's `switch_desktop` (mcp.md). Linked, they act on
+  every screen, wherever the pointer is; per screen, keys and swipes act
+  on the screen under the pointer, the tiles on their row's screen (the
+  bar on the primary screen shows a row per screen, bar.md §4.4). The
+  dots show on every screen that switches.
+- **Linked, as built** (#947): every screen's strip slides at once, with
+  one start time taken on the loop for the switch, each screen sliding
+  its own width plus the gap, so that screens at different refresh rates
+  sample the same curve and end together; reduced motion cross-fades
+  every screen together; desktops in depth move each screen's camera
+  together. There is one switch at a time for all the screens: one
+  coming during a slide or a swipe retargets them all. A swipe moves
+  every strip, its travel counted once in desktops and drawn at each
+  screen's width; released, all complete or all spring back (the first
+  screen's strip decides). Going to a window on another desktop
+  (Alt+Tab, the bar's lists, an agent's line, a notification, the
+  overview) switches every screen; Alt+Tab's "Ce bureau seulement" is
+  desktop N of every screen. The focus after a switch goes to the window
+  focused last on the new desktop of the screen under the pointer, else
+  of the screen that had the focus, else to the window on top there; the
+  pointer does not move. `Super+Shift+1…9`, a window let go on a tile or
+  a thumbnail, `Super+Alt+←/→` and a drag onto another screen switch
+  nothing, as per screen; `Super+Ctrl+Shift+1…9` and `←/→` take the window
+  and switch every screen with it. The control socket's
+  `desktop-switched` is told once per screen that switched, in the same
+  turn of the loop.
+- **The setting changed live** (6.14): linked, every screen goes to the
+  number the screen under the pointer shows (it does not move, the
+  others slide); unlinked, nothing moves and each screen switches alone
+  from then. The count is always the same on every screen: a desktop a
+  project adds is added on every screen (projects.md §7). A screen
+  plugged, turned on or uncovered by the lid joins the link: it shows
+  the number the others show, whatever it showed when it left, its
+  windows coming back to their desktops and places as below.
 - **Animation**: the desktops sit side by side, in their order, like one
   strip. Switching slides the strip: the outgoing desktop's windows move
   out on one side while the incoming one's move in from the other, in
@@ -908,6 +946,71 @@ screen that came back, the shell having asked for none of its surfaces
 on no screen; and checks the compositor's choice with a client that asks
 for them so.
 
+### Mirroring (#931)
+
+As built (spec s931, variant C, « Ajuster»): one screen, the **shown**
+one, has its picture on every other screen on, the **mirrors**.
+
+- **A mirror is no screen for the desktop.** Mirroring starts as the
+  mirror is unplugged ("A screen unplugged" above, the clients told in
+  the same order): its windows go to the shown screen onto the same
+  desktop number, its layer surfaces close, its `wl_output` global goes;
+  it keeps lighting, in its own mode (nothing is tried). It stops as a
+  screen of the same identity plugged back: at its place, its windows
+  flying back, linked desktops showing the others' number. Nothing is
+  said. The pointer, hot corners, magnetic edges and the overview never
+  reach a mirror (it is not in the layout); the bar, the desktops and the
+  lock are the shown screen's, so on the mirror too.
+- **The picture, fitted**: the shown screen's elements drawn into a
+  picture of its size, kept between frames with damage tracking of its
+  own (only what changed is drawn again), that picture scaled with linear
+  filtering, its proportions kept, centred, black bands around it
+  (`magnifier/draw.rs`, `mirrored`, the magnifier's lens; GLES and
+  pixman alike). The laptop (2560 × 1600) on a 1920 × 1080 TV: × 0.675,
+  1728 × 1080, 96 px bands left and right. The pointer is drawn where it
+  is, at the fitted scale. A mirror draws when the shown screen draws
+  (`redraw::Commits`, its `follows`), only the damage scaled; nothing at
+  rest.
+- **Which screen is shown**: the built-in panel when it is on, else the
+  primary screen; "Montrer" (6.9) changes it.
+- **Kept per set of screens**, in the compositor's state file
+  (`screen-sets`, each set's line gains `mirror = "IDENTITY"`), not the
+  configuration. A set seen before takes its choice back in the turn its
+  screens light (no bubble); one never seen lights extended and the
+  winking panda offers « Recopier » (below).
+- **Turning it on and off**: `Super+Shift+P` and `XF86Display` (the
+  action `mirror`, "Recopier les écrans", read "Étendre les écrans" while
+  mirrored; nothing with one screen), the palette, the bubble's
+  « Recopier », the bar's « Recopie » sign's « Arrêter la recopie »
+  (bar.md), the Settings' "Deux écrans" (6.9). The shell answers
+  `mirror on|off` (`ToCompositor::Mirror`); it is told `mirror` (the
+  shown screen and the mirrors, `ToShell::Mirror`) as it starts and
+  stops, and as it connects.
+- **The mirror unplugged**: nothing moves, nothing is said; the set
+  keeps mirroring. **The shown screen going** (the lid, unplugged, turned
+  off): mirroring stops for now, the other screen takes the windows and
+  the bar; it comes back as the set does (the lid opened).
+- **Sharing and recording** (sharing.md 5.11, screenshots.md 5.10): the
+  share chooser lists the screens of the desktop, so the shown one alone;
+  a share of a mirror ends and its recording stops and saves as mirroring
+  starts, as for a screen unplugged.
+
+The new set's bubble: the winking panda, as in "Saying it", one bold
+line "**Écran externe 55 pouces branché.**" / "**55-inch screen plugged
+in.**" over a blue button « Recopier » / « Mirror » (30 px, `#5B8DEF`,
+radius 8). It stays **8 s** (it has an action, as an agent's peek); a
+click on the bubble elsewhere than the button sends it back. Not while
+locked (nothing is said, after unlocking either); an agent's peek
+replaces it and it never replaces one; the secretary's briefing open, it
+waits until it closes, then shows its 8 s. The compositor tells the
+shell `screens-new` (`ToShell::ScreensNew`: built-in or not, inches).
+
+Measured headless (`tests/mirror.rs`, `tests/mirror_bar.rs`): the TV's
+bands black and the laptop's pixels where the fit puts them, within a
+pixel; the pointer at (1024, 640) drawn at (960, 540); clients told of
+one `wl_output`; at rest neither screen draws, and a window's commit
+draws each once.
+
 ### Screens of different scales
 
 A screen at 1 beside one at 2 (or 1.25 … 1.75), side by side (#419; the
@@ -1013,10 +1116,13 @@ between desktops and screens, beside the bar's tiles (§6, 8.5 B).
   nothing of its own; with reduced motion the overview fades in as by
   its keys. It is `corner:top-left` in `[shortcuts] overview`; since #893
   each of the four corners runs the action bound to it, with the same
-  rules, the bar's corner being the top one on its side (settings.md
-  "Gestures and corners"; `[overview] hot-corner = false`, from older
-  files, still takes the default away). Nothing runs at rest but the
-  dwell's one timer.
+  rules, the bar's corner being the top-left one with the bar on the left
+  only (settings.md "Gestures and corners"; `[overview] hot-corner =
+  false`, from older files, still takes the default away). The top-right
+  corner is never the bar's (#944): its pixel is above the bar, where the
+  bar's edge (bar.md §2, level with the bar) never starts its 300 ms, so
+  with the bar on the right it opens every desktop there too (§12c).
+  Nothing runs at rest but the dwell's one timer.
 - **On every screen at once**, each with its own desktops: the wallpaper
   dimmed (`rgba(7,9,15,0.5)` over it); along the top, the screen's
   desktops as live thumbnails, in the screen's shape, a ninth of its
@@ -1109,6 +1215,124 @@ between desktops and screens, beside the bar's tiles (§6, 8.5 B).
   in front; two screens with the bar, the badge, a drag over a
   thumbnail (`HOCUS_SHOTS`: their screenshots).
 
+## 12c. Every desktop at once (#944)
+
+Approved 2026-11-25 (s944, variant C): a third level after the desktop
+and the overview, every desktop with its windows at their places and
+sizes, each screen showing its own desktops in a grid. For seeing what
+is where, going there, and moving windows between desktops and screens
+with the mouse. A mode of the overview (`overview.rs`): what the
+overview does with the bar, the keys, the clients and the agents holds
+here unless said.
+
+- **Opening** (the action `all-desktops`, "Tous les bureaux" / "Every
+  desktop"): `Super+Shift+W` (nested `Alt+Super+Shift+W`), three fingers
+  down (`swipe:3:down`: once the fingers' first travel says down, the
+  view opens; the rest of the swipe does nothing) and the top-right
+  corner (`corner:top-right`, the top-left one's rules, §12b, on the
+  bar's screen too), from the desktop or the overview; the palette lists
+  it. Again (keys, corner), `Super+W` or four fingers down: zooms back
+  into the desktop shown. Three fingers up close it while it shows,
+  built in, whatever `swipe:3:up` is bound to; closed, three fingers up
+  are unchanged (the application's by default). `Esc`, or a click
+  outside every desktop, closes it at once (no zoom back). A file giving
+  `corner:top-right` or `swipe:3:down` to another action keeps it; the
+  older `[touchpad] swipe-desktops = false` takes three fingers down
+  away too. The session locking, or a screen plugged or unplugged,
+  closes it at once.
+- **The grid**: each screen's desktops in reading order, one row for 1
+  or 2, 2 × 2 for 3 or 4, 3 × 2 for 5 or 6, 3 × 3 for 7 to 9 (rows of 4
+  past 9), the same grid on every screen. **One scale for every
+  screen**, the largest at which each one's grid fits the screen (from
+  the bar's edge on its side), 64 px in from its edges, 48 px between
+  columns, 40 between rows, 56 px under each desktop for its label; the
+  grid centred there
+  (0.39 for a 2048 × 1280 laptop with its bar and a 3440 × 1440 screen: a
+  window carried across keeps its size). A screen draws only its own
+  windows.
+- **A desktop**: the screen's wallpaper (the bar's column empty), a 1 px
+  `rgba(255,255,255,0.12)` rim (radius 10), its windows at their places
+  and sizes in stacking order from their own textures, windows on all
+  desktops on every desktop of their screen, minimised ones not; over
+  the wallpaper dimmed (`rgba(7,9,15,0.5)`). The desktop shown ringed
+  2 px in the accent, 4 px out. Its label 14 px under it: the number
+  (13.5 px, 600, `text.dim`), "3 · Courrier" with a name; a project's
+  monogram (22 × 20), "2 · hocus-site" (700) and its folder (Martian
+  Mono 11 px, `text.faint`). An empty desktop shows the overview's
+  resting panda (75 % of its height, 96 px at most), breathing as the
+  view opens. A window hosting agents carries the overview's badge,
+  smaller (a 26 px panda, 11.5 px words), a waiting panda bobbing.
+- **Pointer**: a desktop under the pointer lights (a 2 px
+  `rgba(255,255,255,0.38)` inner ring) on every screen when the screens
+  are linked, its own alone per screen. A click on a desktop zooms into
+  it, every screen going there (#947; per screen, that screen alone, the
+  others' views closing with it), the focus as after a switch; on a
+  window, the same and the window gets the keyboard. No ✕ (closing is
+  the overview's). The bar stays in front and works: a click on a
+  desktop's tile zooms into that desktop (the shown one's too); a window
+  carried onto a tile goes to that desktop (8.5 B).
+- **Moving a window**: pressed and moved 6 px, a window lifts (1.04
+  about the pointer, a 1 px `#7EE0A0` rim, a moving window's shadow) and
+  follows the pointer at the view's scale, across screens too, its place
+  showing at 25 %. The desktop under it lights (`rgba(108,194,135,0.28)`,
+  a 2 px `#7EE0A0` ring) and its label says "Lâcher : bureau 3" / "Drop:
+  desktop 3" (700, `#7EE0A0`). Let go there, the window goes to that
+  desktop of that screen, on top of its windows, nothing switching, the
+  view staying open: floating, where it was let go, its size kept but no
+  larger than the work area and wholly inside it; snapped, maximised or
+  fullscreen, the same zone there. On its own desktop or outside every
+  desktop, it springs back (200 ms). An agent's window carries its
+  agents.
+- **Keyboard**: `←/→/↑/↓` move a selection (2 px `#EEF1F6`, 9 px out) on
+  every screen's desktop N, the first press from the desktop shown, `←/→`
+  in reading order, `↑/↓` by rows, nothing past the ends; `Enter` zooms
+  into it; `Super+1…9` into that desktop. `Tab`, `Shift+Tab` into the
+  selected desktop's windows (the overview's ring), the screens left to
+  right; `Enter` goes to that window; `Super+Shift+1…9` sends it to that
+  desktop of its screen, the view staying open; `Esc` back to the
+  desktops, again closes. Other keys reach no application.
+- **Motion**: every desktop's picture travels from where it is to its
+  place in the next level, positions and scales together, in 320 ms on
+  the strip's curve (`cubic-bezier(0.22, 0.9, 0.3, 1)`), from one start
+  time for every screen: from the desktop, the shown one shrinks to its
+  place, the others come from beside it on the strip; from the overview,
+  its thumbnails grow into the grid and its windows go back to their
+  places; zooming into a desktop is the same backwards (the screens
+  switch at once under it). The labels, rings, badges and pandas fade
+  with it. Reduced motion: a 120 ms cross-fade. At rest nothing draws but
+  what clients commit and a waiting badge's panda; every label and badge
+  is a picture drawn once per look.
+- **Agents and programs**: nothing new; an agent switching desktops
+  moves the ring, the view stays open. No line of the control socket.
+- **As built** (`crates/hocus-compositor/src/overview/grid.rs`, its
+  drawing in `overview_draw/grid.rs`). Measured headless
+  (`tests/all_desktops.rs`, #947's two screens): `Super+Shift+W` shows
+  both screens' four desktops in a 2 × 2 grid, each window inside its
+  desktop at its place, 1 ringed; it, `Esc` and `Super+W` close it, the
+  desktops and focus as before; three fingers down open it, from the
+  overview too, no swipe reaching a client; three fingers up close it
+  before their binding (the lock), which they run once closed, and with
+  no binding reach the client whole; the 34-inch's top-right corner
+  opens it after its rest, once per entry, and closes it, passing
+  through opens nothing; on the laptop alone with its bar on the right,
+  the very corner opens it without bringing the bar in front, the edge
+  level with the bar bringing it as before; with the bar on the left its
+  top-left corner stays the bar's; a file's `close = ["Super+Q",
+  "swipe:3:down"]` keeps the fingers; a click on a desktop or a window
+  goes there on both screens, the window focused, on the laptop alone
+  per screen; the pointer lights a desktop, a click outside closes at
+  once; a snapped window carried to another desktop keeps its zone, a
+  floating one carried to the other screen lands where let go inside the
+  work area, one let go on its own desktop or nowhere stays; the label
+  under a carried window; the arrows, `Enter`, `Tab`, `Super+Shift+4`;
+  6 and 8 desktops' grids; one scale, 0.39; a project's label; a waiting
+  agent's badge; the empty desktops' pandas; reduced motion's fade; the
+  lock and a screen unplugged close it; at rest no frame in half a
+  second. Unit tests: the grid's shapes, the scale and places for the
+  two screens, the arrows, a window inside its desktop, the pictures at
+  scales 1 to 2. With the real shell (`tests/bar_desktops.rs`): a tile
+  clicked zooms into its desktop.
+
 ## 13. Shortcuts
 
 Most use `Super`, as in the user's current desktop; `Alt+Tab` and
@@ -1155,6 +1379,7 @@ holds the keyboard; the virtual terminals' switch stays.
 | `launcher` | `Super+Space` | Opens the launcher on the screen under the pointer; again, closes it ([launcher.md](launcher.md)) |
 | `actions` | `Super+P` | The actions palette: every action of the desktop, searchable, run on the focused window or its screen; again, closes it ([actions.md](actions.md)) |
 | `overview` | `Super+W` | The overview on every screen: their desktops and windows at once; again, closes it (§12b) |
+| `all-desktops` | `Super+Shift+W` | Every desktop at once, each screen's in a grid, from the desktop or the overview; again, back to the desktop shown (§12c) |
 | `clipboard` | `Super+V` | The clipboard's history; again, closes it ([bar.md](bar.md), 5.6) |
 | `emoji` | `Super+period` | The emoji picker, under the focused application's caret ([emoji.md](emoji.md)) |
 | `join` | `Super+J` | Joins the meeting whose reminder shows, else the one starting next within 10 min; nothing without one ([bar.md](bar.md), Day.6) |
@@ -1476,3 +1701,12 @@ Done when the maintainer, in a Hocuspanda session from GDM on the laptop:
     desktop and keeps the overview open; windows hosting agents carry a
     big panda badge, waving while one waits, and empty desktops a
     sleeping panda.
+17. Every screen's desktop switched together (#947, variant C, decided
+    on 2026-11-25): linked by default (`[desktops] per-screen = false`),
+    no screen kept apart (a window on all desktops does that); the bar
+    keeps one row per screen, the rings moving together, a click on any
+    row switching every screen; a project is desktop N on every screen;
+    unlinked with a project on several screens, it stays on the screen
+    holding most of its windows, the others' leaving it, open; the dots
+    and the project's pill show on every screen that switches; an
+    agent's `switch_desktop` naming a screen switches every screen.

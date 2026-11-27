@@ -17,6 +17,15 @@
 //! most, into a buffer of fixed size that is overwritten with zeros once
 //! the field has taken what it wants: it may be a password. Nothing here
 //! logs it, nor its length.
+//!
+//! The same data device takes a drag of files over a phone's row (bar.md
+//! "The phone", #957): the compositor says when one is over the
+//! connections ([`hocus_link::ToShell::FileDrag`]), since the shell cannot
+//! tell which of its surfaces a drag's `enter` names; the phone's row then
+//! reads the files the drag carries ([`drag_files`]), takes the offer or
+//! refuses it ([`drag_take`]), and let go, finishes it ([`drag_finish`]).
+//! Those wait for the data device's events on a thread of their own, never
+//! on the loop, for [`WAIT`] at most.
 
 use std::{
     io::{PipeReader, Read},
@@ -30,7 +39,7 @@ use wayland_client::{
     globals::{GlobalListContents, registry_queue_init},
     protocol::{
         wl_data_device::{self, WlDataDevice},
-        wl_data_device_manager::WlDataDeviceManager,
+        wl_data_device_manager::{DndAction, WlDataDeviceManager},
         wl_data_offer::{self, WlDataOffer},
         wl_registry::WlRegistry,
         wl_seat::WlSeat,
@@ -45,6 +54,10 @@ const WAIT: Duration = Duration::from_secs(2);
 const ROOM: usize = 4096;
 /// The types kept per offer: a client may offer many.
 const TYPES: usize = 32;
+/// The type a drag of files offers.
+const URIS: &str = "text/uri-list";
+/// The most read of a drag's files' addresses.
+const URIS_ROOM: usize = 64 * 1024;
 
 /// How a field takes the clipboard's text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,11 +132,13 @@ struct Clipboard {
 }
 
 /// What the compositor offers: the clipboard's selection, and what a drag
-/// over the shell carries (never taken, let go when it leaves).
+/// over the shell carries, with its `enter`'s serial (let go when it
+/// leaves); let go on the shell, it is kept until [`drag_finish`] takes it.
 #[derive(Debug, Default)]
 struct Offers {
     selection: Option<WlDataOffer>,
-    dragged: Option<WlDataOffer>,
+    dragged: Option<(WlDataOffer, u32)>,
+    dropped: Option<WlDataOffer>,
 }
 
 /// An offer's types, as they come.
@@ -171,18 +186,135 @@ impl Clipboard {
             tracing::debug!(?types, "the clipboard holds no text");
             return Ok(None);
         };
-        let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
-        offer.receive((*kind).to_owned(), writer.as_fd());
-        drop(writer);
-        // The loop flushes what is left when the socket is full.
-        match self.connection.flush() {
-            Ok(()) => {}
-            Err(wayland_client::backend::WaylandError::Io(e))
-                if e.kind() == std::io::ErrorKind::WouldBlock => {}
-            Err(e) => return Err(e.to_string()),
-        }
+        let reader = ask(&self.connection, offer, kind)?;
         tracing::debug!(kind, "the clipboard's text asked for");
         Ok(Some(reader))
+    }
+}
+
+// --- A drag of files -----------------------------------------------------------------
+
+/// The files the drag over the shell carries, their `text/uri-list` lines
+/// (`#` comments left out), read from its offer. Waits for the offer and
+/// for what its client writes, [`WAIT`] at most each: on a thread of its
+/// own, never the loop's. An error when there is none, it carries no files
+/// or its client did not write them in time.
+pub fn drag_files() -> Result<Vec<String>, String> {
+    let until = Instant::now() + WAIT;
+    let pipe = wait_for(until, |clipboard| {
+        let (offer, _) = clipboard.offers.dragged.as_ref()?;
+        Some(ask(&clipboard.connection, offer, URIS))
+    })
+    .ok_or("no drag over the shell")??;
+    let mut room = vec![0; URIS_ROOM];
+    let len = read_until(&pipe, &mut room, Instant::now() + WAIT)?;
+    let text = std::str::from_utf8(&room[..len]).map_err(|_| "the files' list is not UTF-8")?;
+    Ok(text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(str::to_owned)
+        .collect())
+}
+
+/// Takes the drag's offer (its files, copied), or refuses it: let go, it
+/// comes to the shell only taken. Nothing when no drag is over the shell.
+pub fn drag_take(take: bool) {
+    let mut clipboard = CLIPBOARD.lock().unwrap_or_else(PoisonError::into_inner);
+    let Some(clipboard) = clipboard.as_mut() else {
+        return;
+    };
+    if let Err(err) = clipboard.queue.dispatch_pending(&mut clipboard.offers) {
+        tracing::warn!(%err, "the clipboard's events");
+    }
+    let Some((offer, serial)) = &clipboard.offers.dragged else {
+        return;
+    };
+    if take {
+        offer.accept(*serial, Some(URIS.to_owned()));
+        offer.set_actions(DndAction::Copy, DndAction::Copy);
+    } else {
+        offer.accept(*serial, None);
+        offer.set_actions(DndAction::empty(), DndAction::None);
+    }
+    flush(&clipboard.connection);
+}
+
+/// The drag let go on the shell is finished: its client hears its files
+/// were taken. Waits for its `drop`, [`WAIT`] at most: on a thread of its
+/// own. Whether it came.
+pub fn drag_finish() -> bool {
+    let finished = wait_for(Instant::now() + WAIT, |clipboard| {
+        let offer = clipboard.offers.dropped.take()?;
+        offer.finish();
+        offer.destroy();
+        flush(&clipboard.connection);
+        Some(())
+    });
+    finished.is_some()
+}
+
+/// Handles the data device's events until `take` finds what it waits for,
+/// reading them from the connection meanwhile (iced reads them too: the
+/// first to read hands each queue its own), until `until`.
+fn wait_for<T>(until: Instant, mut take: impl FnMut(&mut Clipboard) -> Option<T>) -> Option<T> {
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+    loop {
+        let guard = {
+            let mut clipboard = CLIPBOARD.lock().unwrap_or_else(PoisonError::into_inner);
+            let clipboard = clipboard.as_mut()?;
+            if let Err(err) = clipboard.queue.dispatch_pending(&mut clipboard.offers) {
+                tracing::warn!(%err, "the clipboard's events");
+                return None;
+            }
+            if let Some(found) = take(clipboard) {
+                return Some(found);
+            }
+            clipboard.queue.prepare_read()
+        };
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        // Events of its own already read: handled at once.
+        let Some(guard) = guard else {
+            continue;
+        };
+        let timeout = Timespec::try_from(left).ok()?;
+        let fd = guard.connection_fd();
+        let mut fds = [PollFd::new(&fd, PollFlags::IN)];
+        let ready = matches!(poll(&mut fds, Some(&timeout)), Ok(n) if n > 0);
+        if ready {
+            match guard.read() {
+                Ok(_) => {}
+                Err(wayland_client::backend::WaylandError::Io(e))
+                    if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(err) => {
+                    tracing::warn!(%err, "could not read the data device's events");
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+/// Asks `offer` for `kind`: the pipe its client writes it to.
+fn ask(connection: &Connection, offer: &WlDataOffer, kind: &str) -> Result<PipeReader, String> {
+    let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
+    offer.receive(kind.to_owned(), writer.as_fd());
+    drop(writer);
+    flush(connection);
+    Ok(reader)
+}
+
+/// Sends what is asked; the loop flushes what is left when the socket is
+/// full.
+fn flush(connection: &Connection) {
+    match connection.flush() {
+        Ok(()) => {}
+        Err(wayland_client::backend::WaylandError::Io(e))
+            if e.kind() == std::io::ErrorKind::WouldBlock => {}
+        Err(err) => tracing::warn!(%err, "could not send to the compositor"),
     }
 }
 
@@ -341,13 +473,24 @@ impl Dispatch<WlDataDevice, ()> for Offers {
                     old.destroy();
                 }
             }
-            wl_data_device::Event::Enter { id, .. } => {
-                if let Some(old) = std::mem::replace(&mut offers.dragged, id) {
+            wl_data_device::Event::Enter { serial, id, .. } => {
+                if let Some((old, _)) =
+                    std::mem::replace(&mut offers.dragged, id.map(|o| (o, serial)))
+                {
                     old.destroy();
                 }
             }
-            wl_data_device::Event::Leave | wl_data_device::Event::Drop => {
-                if let Some(old) = offers.dragged.take() {
+            wl_data_device::Event::Leave => {
+                if let Some((old, _)) = offers.dragged.take() {
+                    old.destroy();
+                }
+            }
+            // Only once its offer was taken: kept for its files, then
+            // finished. One before it, never finished, is let go: its
+            // client hears it cancelled.
+            wl_data_device::Event::Drop => {
+                let dropped = offers.dragged.take().map(|(offer, _)| offer);
+                if let Some(old) = std::mem::replace(&mut offers.dropped, dropped) {
                     old.destroy();
                 }
             }

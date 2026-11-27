@@ -41,6 +41,7 @@ use fakes::Fakes;
 use hocus_compositor::{Config, FormChoice, Headless, HeadlessConfig, RendererChoice, model::Rect};
 
 const KEY_ENTER: u32 = 28;
+const KEY_W: u32 = 17;
 const KEY_SPACE: u32 = 57;
 /// The sound's row's middle on the 1920 × 1080 screen (three rows, no
 /// line under them, #900).
@@ -658,6 +659,36 @@ fn a_click_on_a_tile_slides_to_its_desktop() -> anyhow::Result<()> {
     bed.on(2)?;
     bed.settle()?;
     bed.shows("the third ringed", |bed| bed.ringed(2))?;
+    Ok(())
+}
+
+/// Every desktop showing (#944): a click on a tile zooms into its desktop,
+/// the strip switching at once under the zoom, and the view closes.
+#[test]
+fn a_click_on_a_tile_zooms_every_desktop_into_it() -> anyhow::Result<()> {
+    let Some(shell) = ready() else {
+        return Ok(());
+    };
+    let mut bed = start(&shell, Setup::default())?;
+    let third = bed.middle(2);
+    bed.hp.pointer_move(600.0, 500.0);
+    chord(&mut bed.hp, &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_W]);
+    let open = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.all_desktops() == Some(true))?;
+    anyhow::ensure!(open, "every desktop never showed");
+    wait(&mut bed.hp, Duration::from_millis(400))?;
+    bed.click(third)?;
+    let gone = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.all_desktops() != Some(true) && hp.desktop().0 == 2
+    })?;
+    anyhow::ensure!(gone, "still showing, on {:?}", bed.hp.desktop());
+    // At once: the strip never slid.
+    assert_eq!(bed.hp.desktop(), (2, 2.0));
+    let closed = bed
+        .hp
+        .dispatch_until(WAIT, |hp| hp.all_desktops().is_none())?;
+    anyhow::ensure!(closed, "every desktop stays");
     Ok(())
 }
 

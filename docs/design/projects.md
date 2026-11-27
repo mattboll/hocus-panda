@@ -58,6 +58,26 @@ Decided with the maintainer (2026-11-13):
   is a project already (then the project stays waiting for its screen
   with its windows, as they do). The screen back, it goes back with
   them.
+- **The screens linked** (#947, windows.md §12, the default): a project
+  is a desktop number on every screen. Its windows are those on desktop
+  N of any screen, its name names desktop N on every screen, its pill
+  and its monogram show on every screen's dots and row. Its list (from
+  any row's tile) and its card (from any screen's thumbnail, or the
+  launcher when closed) group its windows by screen, the bar's (the
+  card's) screen first, each group under that screen's 6.9 name in
+  capitals ("ÉCRAN DU PORTABLE", 10.5 px, 700, `text.faint`), none for
+  a screen with no window there, its count every screen's together; the
+  list then has no line saying which screen. Made from one
+  screen's thumbnail, desktop N of every screen is the project; closing
+  saves each window with its screen, reopening puts each back on its own
+  (a screen missing then: the launcher's screen, on the same desktop);
+  "the current one when empty" (§7) means empty on every screen.
+  Unlinked, a project that spanned the screens stays on the screen
+  holding most of its windows (ties: the primary), the others' windows
+  staying open and leaving it. Linked with two projects on one number,
+  the one of the screen under the pointer keeps it, the others staying
+  on their screen alone until they close (`reach = "own-screen"` in the
+  file).
 - **A desktop taken out** (`[desktops] count`, the Settings' `desktop-remove`):
   the project goes with its windows to the desktop they go to, unless
   that one is a project: then it is closed first, as by its menu (§5),

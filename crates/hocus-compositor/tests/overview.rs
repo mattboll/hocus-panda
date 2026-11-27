@@ -240,15 +240,16 @@ fn a_click_on_the_second_thumbnail_shows_desktop_2_and_keeps_it_open() -> anyhow
     let at = thumb(&hp, FIRST, 1)?;
     click(&mut hp, at)?;
     assert_eq!(hp.overview(), Some(true), "it stays open");
-    assert_eq!(shown(&hp), [1, 0]);
-    // Desktop 2 is empty: only the other screen's window is laid out.
+    // The screens linked (#947), both show their desktop 2.
+    assert_eq!(shown(&hp), [1, 1]);
+    // Desktop 2 is empty on both: no window is laid out.
     wait(&mut hp, Duration::from_millis(400))?;
     let laid: Vec<Option<String>> = hp.overview_windows().into_iter().map(|w| w.0).collect();
-    assert_eq!(laid, [Some("test.wide".to_owned())]);
-    // Closed, the screen stays on it.
+    assert_eq!(laid, Vec::<Option<String>>::new());
+    // Closed, the screens stay on it.
     chord(&mut hp, &[KEY_ESC]);
     closed(&mut hp)?;
-    assert_eq!(shown(&hp), [1, 0]);
+    assert_eq!(shown(&hp), [1, 1]);
     Ok(())
 }
 

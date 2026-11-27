@@ -258,6 +258,7 @@ impl State {
         let name = output.name();
         self.displays.gone.retain(|g| g.name != name);
         if !self.displays.outputs.contains(output) {
+            self.mirror_joined(name.clone());
             self.screen_joined(output);
             self.displays.outputs.push(output.clone());
             self.displays.outputs.sort_by_key(Output::name);
@@ -307,6 +308,9 @@ impl State {
     /// where they go before anything else happens; the layout follows
     /// after the turn.
     pub(crate) fn lid_screens(&mut self) {
+        // Mirroring stops first when the lid takes the screen shown, so
+        // that the other is a screen again to take its windows (#931).
+        self.mirror_follow_set();
         for output in self.displays.outputs.clone() {
             let name = output.name();
             let takes = self.lid_takes(&output);
@@ -343,6 +347,8 @@ impl State {
                 self.output_back(&output, true);
             }
         }
+        // The set back may mirror again (the lid opened).
+        self.mirror_follow_set();
         self.displays.wanted = true;
         self.displays.dirty = true;
     }
@@ -602,6 +608,23 @@ impl State {
                     let refused = serde_json::json!({ "refused": "cannot read the screens" });
                     self.displays_send(Some(session), &refused.to_string());
                 }
+            }
+            return;
+        }
+        // "Deux écrans : Étendre | Recopier" and "Montrer" (6.9, #931):
+        // `mirror IDENTITY` shows that screen on the others, `extend`
+        // gives each its own again; kept with the set in use.
+        if let Some(rest) = line.strip_prefix("mirror ") {
+            if let Err(why) = self.mirror_from_settings(Some(rest.trim())) {
+                tracing::warn!(session, line, why, "the Settings asked what cannot be");
+                let refused = serde_json::json!({ "refused": why }).to_string();
+                self.displays_send(Some(session), &refused);
+            }
+            return;
+        }
+        if line.trim() == "extend" {
+            if let Err(why) = self.mirror_from_settings(None) {
+                tracing::warn!(session, line, why, "the Settings asked what cannot be");
             }
             return;
         }
@@ -893,6 +916,7 @@ impl State {
                 .output_geometry(output)
                 .map(|g| (g.loc.x, g.loc.y))
                 .or_else(|| self.displays.off_places.get(&name).copied())
+                .or_else(|| self.mirror_place(&name))
                 .unwrap_or_default();
             let size = logical_size(output).unwrap_or_default();
             let (scale, from) = match settings.and_then(|s| s.scale) {
@@ -953,6 +977,15 @@ impl State {
                 // The magnifier on it (#424): its zoom and view, or null.
                 "magnifier": self.magnifier_json(&name),
             }));
+            // A mirror (#931): the screen whose picture it shows.
+            if let Some(shown) = self.mirror_source(output)
+                && let Some(serde_json::Value::Object(row)) = list.last_mut()
+            {
+                row.insert(
+                    "mirrors".to_owned(),
+                    serde_json::Value::String(shown.name()),
+                );
+            }
         }
         for gone in &self.displays.gone {
             list.push(serde_json::json!({
@@ -977,6 +1010,8 @@ impl State {
             // The set in use and the sets known (windows.md §12, 6.9).
             "set": self.current_set(),
             "sets": self.sets_json(),
+            // Mirroring (#931): the screen shown, by its connector.
+            "shown": self.mirror_shown().map(Output::name),
         })
     }
 
@@ -991,6 +1026,12 @@ impl State {
     /// Every screen as it should be: on or off, its mode and VRR through the
     /// backend, its scale and place; windows go with their screen.
     fn apply_displays(&mut self, backend: &mut Backend) {
+        // A set never seen offers to mirror once laid out (#931); one seen
+        // takes back its choice before it is laid out, its mirrors out of
+        // the layout as they light.
+        let set = self.current_set();
+        let fresh = set.len() >= 2 && !self.set_seen(&set);
+        self.mirror_follow_set();
         let outputs = self.displays.outputs.clone();
         let wanted: Vec<(Output, Wanted)> = outputs
             .iter()
@@ -1038,9 +1079,11 @@ impl State {
         // The windows still where a screen gone put them: still so once
         // the screens moved.
         let put = self.still_put();
-        // Where each was, and its windows, before anything moves.
+        // Where each was, and its windows, before anything moves: a
+        // mirror has neither.
         let before: Vec<Before> = on
             .iter()
+            .filter(|(o, _)| !self.is_mirror(o))
             .map(|(o, _)| {
                 let was = self
                     .space
@@ -1088,7 +1131,11 @@ impl State {
         }
         // The places, with every size as it now is; a screen the lid took
         // away is out of them, as an unplugged one (windows.md §12).
-        let outputs: Vec<Output> = outputs.into_iter().filter(|o| !self.lid_takes(o)).collect();
+        // A mirror is out of them too (#931): it keeps its place for later.
+        let outputs: Vec<Output> = outputs
+            .into_iter()
+            .filter(|o| !self.lid_takes(o) && !self.is_mirror(o))
+            .collect();
         let laid: Vec<Laid> = outputs
             .iter()
             .map(|o| {
@@ -1171,6 +1218,9 @@ impl State {
         self.pointer_onto_primary();
         self.rearrange();
         self.note_screen_set();
+        if fresh {
+            self.mirror_offer();
+        }
         self.redraw = true;
         self.displays.dirty = true;
     }

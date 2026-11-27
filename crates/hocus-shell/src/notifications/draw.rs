@@ -190,6 +190,9 @@ pub struct Laid {
     /// The application's name as it fits, and where the words after it
     /// start.
     app: String,
+    /// A phone's device after its application ("· Pixel 8", #957), and
+    /// where it starts.
+    origin: Option<(String, f32)>,
     when_x: f32,
     urgent_x: Option<f32>,
     title: Vec<String>,
@@ -198,9 +201,15 @@ pub struct Laid {
     pub progress: Option<f32>,
     /// The actions: key, label, button.
     pub actions: Vec<(String, String, Rectangle)>,
+    /// A phone's reply in place (#957): the field and its send button's
+    /// row, under the body, before the actions.
+    pub reply: Option<Rectangle>,
     /// The card's clickable part, under its rim.
     button: f32,
 }
+
+/// The reply's row: a 34 px field and its 34 px send button.
+pub const REPLY: f32 = 34.0;
 
 /// `lines` of `text` broken to fit the column, `most` at most, the last
 /// cut with an ellipsis when more were left.
@@ -235,8 +244,23 @@ pub fn lay(note: &Note) -> Laid {
     let urgent = (note.urgency == Urgency::Critical)
         .then(|| small(words.urgent(), MANROPE_BOLD) + SMALL_GAP + URGENT_GAP);
     let room = COLUMN - when - SMALL_GAP - urgent.unwrap_or(0.0);
-    let app = kit::elide(note.app.trim(), room.max(0.0), |t| small(t, MANROPE_BOLD));
-    let when_x = COLUMN_X + small(&app, MANROPE_BOLD) + SMALL_GAP;
+    // A phone's: its application in bold, its device after it.
+    let (name, origin) = match &note.phone {
+        Some(phone) => (phone.app.as_str(), Some(format!("· {}", phone.device))),
+        None => (note.app.trim(), None),
+    };
+    let origin_room = origin
+        .as_ref()
+        .map_or(0.0, |o| small(o, MANROPE) + SMALL_GAP);
+    let app = kit::elide(name, (room - origin_room).max(0.0), |t| {
+        small(t, MANROPE_BOLD)
+    });
+    let mut when_x = COLUMN_X + small(&app, MANROPE_BOLD) + SMALL_GAP;
+    let origin = origin.map(|o| {
+        let at = when_x;
+        when_x += small(&o, MANROPE) + SMALL_GAP;
+        (o, at)
+    });
     let urgent_x = urgent.map(|_| when_x + when + SMALL_GAP + URGENT_GAP);
     let title = lines(&note.summary, TITLE, MANROPE_BOLD, TITLE_LINES);
     let body = lines(&note.body, BODY, MANROPE, BODY_LINES);
@@ -257,6 +281,14 @@ pub fn lay(note: &Note) -> Laid {
     // does not fit.
     let mut actions = Vec::new();
     let (mut x, mut y) = (COLUMN_X, BORDER + button);
+    let reply = note.phone.as_ref().and_then(|p| p.reply.as_ref()).map(|_| {
+        let row = Rectangle::new(
+            Point::new(COLUMN_X, y),
+            Size::new(ACTIONS_RIGHT - COLUMN_X, REPLY),
+        );
+        y += REPLY + ACTION_GAP;
+        row
+    });
     for (key, label) in &note.actions {
         let label = kit::elide(label, ACTIONS_RIGHT - COLUMN_X - 2.0 * ACTION_PAD, |t| {
             kit::measure(t, ACTION_TEXT, MANROPE_SEMIBOLD)
@@ -273,19 +305,23 @@ pub fn lay(note: &Note) -> Laid {
         ));
         x += width + ACTION_GAP;
     }
-    let below = actions.last().map_or(0.0, |(_, _, r)| {
-        r.y + r.height + ACTION_PAD - BORDER - button
-    });
+    let below = actions
+        .last()
+        .map(|(_, _, r)| *r)
+        .or(reply)
+        .map_or(0.0, |r| r.y + r.height + ACTION_PAD - BORDER - button);
     let height = (BORDER + button + below + BORDER).ceil();
     Laid {
         size: Size::new(WIDTH, height),
         app,
+        origin,
         when_x,
         urgent_x,
         title,
         body,
         progress,
         actions,
+        reply,
         button,
     }
 }
@@ -579,6 +615,9 @@ fn draw_card(f: &mut Frame, shown: &Shown, lit: bool, glass: bool, now: Instant)
         DIM.get(),
         MANROPE_BOLD,
     ));
+    if let Some((origin, x)) = &laid.origin {
+        f.fill_text(text(origin.clone(), *x, middle, SMALL, DIM.get(), MANROPE));
+    }
     f.fill_text(text(
         words.when().to_owned(),
         laid.when_x,
@@ -692,6 +731,34 @@ pub fn draw_more(f: &mut Frame, lit: bool) {
     for dx in [-4.5, 0.0, 4.5] {
         f.fill(&Path::circle(Point::new(c.x + dx, c.y), 1.3), ink);
     }
+}
+
+/// The reply's field and its rim, focused or not (#957).
+pub const REPLY_FILL: Ink = Ink::Dark(rgba(255, 255, 255, 0.06));
+pub const REPLY_RIM: Ink = Ink::Dark(rgba(255, 255, 255, 0.14));
+pub const REPLY_RIM_FOCUSED: Ink = Ink::Accent(0.65);
+/// The send button's blue, lit under the pointer.
+const SEND: Ink = Ink::Dark(rgb(0x5B8DEF));
+const SEND_LIT: Ink = Ink::Dark(rgb(0x6E9BF2));
+
+/// The reply's send button, `size` large: a paper plane on blue.
+pub fn draw_send(f: &mut Frame, size: Size, lit: bool) {
+    let fill = if lit { SEND_LIT } else { SEND };
+    f.fill(
+        &Path::rounded_rectangle(Point::ORIGIN, size, 8.0.into()),
+        fill.get(),
+    );
+    let s = 16.0 / 24.0;
+    let at = Point::new((size.width - 16.0) / 2.0, (size.height - 16.0) / 2.0);
+    let p = |x: f32, y: f32| Point::new(at.x + x * s, at.y + y * s);
+    let plane = Path::new(|b| {
+        b.move_to(p(3.0, 11.0));
+        b.line_to(p(21.0, 3.0));
+        b.line_to(p(14.0, 21.0));
+        b.line_to(p(11.0, 13.0));
+        b.close();
+    });
+    f.fill(&plane, Color::WHITE);
 }
 
 /// An action's button, `size` large, lit under the pointer.
@@ -869,6 +936,7 @@ mod tests {
             number: 0,
             transient: false,
             ancestry: Vec::new(),
+            phone: None,
         }
     }
 

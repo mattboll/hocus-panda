@@ -530,6 +530,13 @@ impl Shell {
                 glass: self.look.glass,
                 motion: self.look.motion,
             }),
+            popover::Item::Phone(key) => popover::phone::view(&popover::phone::Panel {
+                id,
+                key,
+                lang: clock::time::Lang::of_messages(),
+                glass: self.look.glass,
+                motion: self.look.motion,
+            }),
             popover::Item::Brightness => popover::brightness::view(id, self.words, self.look.glass),
             popover::Item::Battery => popover::battery::view(id, self.words, self.look.glass),
             popover::Item::Windows => popover::windows::view(&popover::windows::Panel {

@@ -86,13 +86,13 @@ is the tool's result, `isError: true`, its text saying why.
 | Tool | Arguments | Result |
 |---|---|---|
 | `list_windows` | — | each window: `id`, `title`, `app_id`, `output`, `desktop`, `geometry` {x, y, width, height}, `focused`, `minimized`, `state` (floating, maximized, snapped, fullscreen) |
-| `list_desktops` | — | each screen: `output`, `current`, its `desktops` (`number`, `name`, `windows`) |
-| `list_outputs` | — | each screen: `name`, `geometry`, `work_area`, `scale` |
+| `list_desktops` | — | each screen: `output`, `current`, its `desktops` (`number`, `name`, `windows`); and `linked`, whether every screen switches its desktop together (#947) |
+| `list_outputs` | — | each screen: `name`, `geometry`, `work_area`, `scale`; a screen mirroring another (#931): `name` and `mirror_of`, the screen it shows, nothing else (`move_window` and `launch` naming it are refused) |
 | `get_settings` | `section` (`appearance`) | the settings' values now (the file's, else the default), by key (`appearance.theme`) |
 | `journal` | `limit` (50) | this agent's entries, oldest first |
 | `focus_window` | `window`, `intent` | brought forward with the keyboard; a minimised one comes back |
 | `move_window` | `window`, `x`, `y`, `width`, `height` (any of them), `desktop`, `intent` | moved and sized (a snapped or maximised window floats first), and/or sent to that desktop of its screen; its new `geometry` and `desktop` |
-| `switch_desktop` | `desktop`, `output` (default the focused window's screen), `intent` | that screen shows it |
+| `switch_desktop` | `desktop`, `output` (default the focused window's screen), `intent` | that screen shows it; linked (#947), every screen does, whatever `output` names, the answer's `screens` listing each with its desktop |
 | `launch` | `app` (a desktop entry's id, else its name, ignoring case), `desktop`, `output` (default the pointer's screen), `intent` | started, as the launcher starts it; with `desktop`, its first window opens there |
 | `set_setting` | `key` (`appearance.theme`), `value`, `intent` | written into the configuration file in place (hocus-config), `before` and `after`. Only keys `packaging/config.toml` lists, with a value of their default's type |
 | `celebrate` | `why` (120 characters at most) | good news (#809): the agent's row says why until its next request, the confetti fly when `[effects] confetti` is on; `celebrated`, and whether the `confetti` flew. Any agent the file names, a `read` one too (it touches nothing); refused while locked or stopped |

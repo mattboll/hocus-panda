@@ -569,6 +569,7 @@ impl Record {
             sound: None,
             transient: false,
             ancestry: Vec::new(),
+            phone: None,
         };
         Restored {
             note,
@@ -781,6 +782,7 @@ pub(crate) mod tests {
             sound: None,
             transient: false,
             ancestry: Vec::new(),
+            phone: None,
         }
     }
 

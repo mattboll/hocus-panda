@@ -174,6 +174,10 @@ impl App {
             Control::Desktops(Stop::Minus),
             Control::Desktops(Stop::Plus),
         ];
+        // "Changer de bureau", between the count and the names (#947).
+        if let Some(slot) = self.desktops_slot(model::PER_SCREEN) {
+            out.push(Control::Setting(slot));
+        }
         for i in 0..count {
             out.push(Control::Desktops(Stop::Name(i)));
             if count > 1 {
@@ -184,7 +188,7 @@ impl App {
             out.push(Control::Desktops(Stop::Add));
         }
         for setting in crate::desktops::settings() {
-            if setting.id == model::COUNT || setting.id == model::NAMES {
+            if [model::COUNT, model::PER_SCREEN, model::NAMES].contains(&setting.id) {
                 continue;
             }
             out.push(Control::Setting(Slot::of(setting, self.source)));
@@ -591,8 +595,28 @@ impl App {
     /// A choice's toast, when it says more than its value: Super to move
     /// says the ink no longer starts.
     pub(super) fn desktops_toast(&self, slot: Slot, value: &Value) -> Option<String> {
-        (slot.setting == model::MOVE_KEY && *value == Value::Word("super"))
-            .then(|| words::MOVE_SUPER_DRAG_THE_INK_NO.get(self.lang).to_owned())
+        let said = match (slot.setting, value) {
+            (model::MOVE_KEY, Value::Word("super")) => words::MOVE_SUPER_DRAG_THE_INK_NO,
+            (model::PER_SCREEN, Value::Bool(false)) => words::THE_SCREENS_SWITCH_DESKTOPS_TOGETHER,
+            (model::PER_SCREEN, Value::Bool(true)) => words::EACH_SCREEN_SWITCHES_ITS_DESKTOPS,
+            _ => return None,
+        };
+        Some(said.get(self.lang).to_owned())
+    }
+
+    /// The line under "Changer de bureau", by its value (#947).
+    pub(super) fn desktops_line(&self, id: &str) -> Option<String> {
+        if id != model::PER_SCREEN {
+            return None;
+        }
+        let per_screen =
+            self.desktops_slot(id).and_then(|s| self.value(s)) == Some(Value::Bool(true));
+        let said = if per_screen {
+            hocus_words::settings::desktops::SUPER_1_SWITCHES_THE_SCREEN_UNDER_THE
+        } else {
+            hocus_words::settings::desktops::SUPER_1_PUTS_EVERY_SCREEN_ON_ITS
+        };
+        Some(said.get(self.lang).to_owned())
     }
 
     // --- What it draws ----------------------------------------------------------------
@@ -670,6 +694,7 @@ impl App {
             head(model::DESKTOPS.label.get(lang), Some(per_screen)),
             vec![
                 self.count_row(),
+                model_row(model::PER_SCREEN),
                 self.names_row(),
                 model_row(model::REMEMBER_TABS),
             ],

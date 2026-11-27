@@ -3,12 +3,14 @@
 //! selection, hands it what clients copy, and pastes what the user picks.
 //!
 //! - **What is copied**: when a client takes the clipboard (a Wayland
-//!   client's selection, or an X11 client's through XWayland), its text
+//!   client's selection, KDE Connect's daemon's through data control
+//!   (#957) included, or an X11 client's through XWayland), its text
 //!   (`text/plain;charset=utf-8`, else `UTF8_STRING` or `text/plain`) or,
 //!   offered no text, its PNG image is read through pipes on a thread of
 //!   its own, 8 MB at most and for 3 s at most, so that a client that hangs
 //!   or offers too much stalls nothing; then the shell is told, with the
-//!   application of the window focused as it was copied (`copied`).
+//!   application of the window focused as it was copied (`copied`), or
+//!   the data control client's own.
 //! - **A capture** (5.8b): the clipboard offering it is the compositor's
 //!   own, never read back; the capture's thread makes its line instead
 //!   (`capture-copied`, [`capture_line`]), the capture's number with it,
@@ -87,6 +89,10 @@ pub struct Clipboard {
     /// How many items the shell's history holds, and how many are pinned,
     /// as it last said (6.17): for the Settings' lines.
     pub(crate) count: Option<(u32, u32)>,
+    /// The application of the data control client setting a selection,
+    /// while smithay tells of it (#957, [`crate::data_control`]): its copy
+    /// is that application's, not the focused window's.
+    pub(crate) setter: Option<String>,
 }
 
 /// A paste waiting for its window to hold the keyboard, and for whether it
@@ -161,12 +167,15 @@ impl State {
         }
         self.clipboard.taken += 1;
         let number = self.clipboard.taken;
-        let app = self
-            .model
-            .focused()
-            .and_then(|id| self.windows.get(&id))
-            .and_then(|m| crate::windows::app_id(&m.window))
-            .unwrap_or_default();
+        let app = match &self.clipboard.setter {
+            Some(app) => app.clone(),
+            None => self
+                .model
+                .focused()
+                .and_then(|id| self.windows.get(&id))
+                .and_then(|m| crate::windows::app_id(&m.window))
+                .unwrap_or_default(),
+        };
         let skip = rules.skip_secrets;
         if skip && (password_manager(&app) || ignored(&app, &rules.ignore)) {
             tracing::debug!(app, "a password manager's copy: not kept");

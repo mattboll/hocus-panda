@@ -511,6 +511,8 @@ fn save_as(image: Rectangle, z: f32) {
         });
         let path = match chosen {
             super::portal::Chosen::Path(path) => Some(path),
+            // A save chooses one file.
+            super::portal::Chosen::Paths(paths) => paths.into_iter().next(),
             super::portal::Chosen::Cancelled => None,
             super::portal::Chosen::NoPortal => {
                 tracing::info!("no file chooser: saved beside the capture");

@@ -198,6 +198,11 @@ pub const ALL: &[Label] = &[
         said: Said::Other,
     },
     Label {
+        key: "desktops.per-screen",
+        name: hocus_words::settings::desktops::SWITCH_DESKTOP,
+        said: Said::Choices(&[("false", hocus_words::settings::bar::EVERY_SCREEN), ("true", hocus_words::settings::app_wallpaper_page::EACH_SCREEN)]),
+    },
+    Label {
         key: "desktops.remember-tabs",
         name: hocus_words::settings::desktops::REMEMBER_PROJECTS_TABS,
         said: Said::Switch,
@@ -553,6 +558,11 @@ pub const ALL: &[Label] = &[
         said: Said::Other,
     },
     Label {
+        key: "shortcuts.all-desktops",
+        name: hocus_words::settings::keyboard::ALL_DESKTOPS,
+        said: Said::Other,
+    },
+    Label {
         key: "shortcuts.brightness-down",
         name: hocus_words::settings::keyboard::BRIGHTNESS_DOWN,
         said: Said::Other,
@@ -665,6 +675,11 @@ pub const ALL: &[Label] = &[
     Label {
         key: "shortcuts.minimize",
         name: hocus_words::settings::keyboard::MINIMISE_THE_WINDOW,
+        said: Said::Other,
+    },
+    Label {
+        key: "shortcuts.mirror",
+        name: hocus_words::settings::keyboard::MIRROR_THE_SCREENS,
         said: Said::Other,
     },
     Label {

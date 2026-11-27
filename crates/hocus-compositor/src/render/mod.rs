@@ -1799,6 +1799,14 @@ impl State {
 
     fn tell_frames(&self, output: &Output, shown: Shown<'_>) {
         let now: Duration = self.clock.now().into();
+        // A frame drawn: when, for the motions' end (`judge_still`).
+        if let (Shown::Drawn(_) | Shown::Unknown, Some(at)) = (shown, self.frames.drawn_at.get()) {
+            let mut drawn_on = self.frames.drawn_on.borrow_mut();
+            match drawn_on.iter_mut().find(|(o, _)| o == output) {
+                Some((_, last)) => *last = at,
+                None => drawn_on.push((output.clone(), at)),
+            }
+        }
         // Frames are paced by the backend, never throttled here.
         let throttle = Some(Duration::ZERO);
         // A screen unplugged lives on a moment, its global disabled
