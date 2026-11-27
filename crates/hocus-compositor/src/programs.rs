@@ -221,8 +221,8 @@ pub fn launch(launch: hocus_link::Launch, terminal: Option<String>, env: Env) {
 /// What became of an application started by [`launch_watched`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
-    /// It runs.
-    Started,
+    /// It runs: its process.
+    Started(u32),
     /// It could not start: no terminal for it, or its program would not
     /// run.
     Failed,
@@ -246,7 +246,7 @@ pub fn launch_watched(
         match cmd.spawn() {
             Ok(mut child) => {
                 tracing::info!(app = launch.id, pid = child.id(), "started");
-                said(Outcome::Started);
+                said(Outcome::Started(child.id()));
                 match child.wait() {
                     Ok(status) => {
                         tracing::info!(app = launch.id, %status, "ended");

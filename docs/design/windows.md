@@ -1579,7 +1579,9 @@ page, "Rouvrir les applications de la dernière session", settings.md).
   its `Path`, its terminal); not one the autostart starts (the same entry
   id or the same program), whose windows still go back. Each window that
   maps takes the first saved place of its application (by app id) still
-  waiting, before its first frame where it can (its size in its first
+  waiting; a window of a process started for some places (a terminal
+  started in its folder, #952) takes the first of those, whichever shows
+  first; before its first frame where it can (its size in its first
   configure): its screen, desktop, place, state, kept above, on all
   desktops; it opens there without pulsing. Its screen not there: it goes
   where it waited for it as the session ended, when it was waiting and

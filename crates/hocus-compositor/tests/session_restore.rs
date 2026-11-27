@@ -25,6 +25,8 @@ const RESTORED_COUNT: &str = "HOCUS_TEST_RESTORED_COUNT";
 /// Started again by the compositor from a desktop entry: as many windows
 /// of [`RESTORED_APP`] as [`RESTORED_COUNT`] says, each on a connection of
 /// its own, until the compositor goes. Run alone, it does nothing.
+/// Started in a folder (a terminal's), its windows are titled after it,
+/// and come as late as its file `late-ms` says.
 #[test]
 fn restored_program() -> anyhow::Result<()> {
     let Ok(app) = std::env::var(RESTORED_APP) else {
@@ -41,6 +43,18 @@ fn restored_program() -> anyhow::Result<()> {
     } else {
         PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap_or_default()).join(display)
     };
+    let folder = std::env::current_dir()?;
+    if let Some(ms) = std::fs::read_to_string(folder.join("late-ms"))
+        .ok()
+        .and_then(|t| t.trim().parse().ok())
+    {
+        std::thread::sleep(Duration::from_millis(ms));
+    }
+    let title: &'static str = folder
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+        .leak();
     let clients = (0..count)
         .map(|_| {
             client(
@@ -53,6 +67,9 @@ fn restored_program() -> anyhow::Result<()> {
             )
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
+    for client in &clients {
+        client.commands.send(common::Command::Title(title))?;
+    }
     // Its events end with its connection, as the compositor goes.
     for client in clients {
         while client.events.recv().is_ok() {}
@@ -385,6 +402,60 @@ fn a_window_waiting_for_its_screen_comes_back_as_it_was_on_each() -> anyhow::Res
     bar(&mut hp)?;
     back(&mut hp)?;
     assert_eq!(kept(&hp, APP), half, "its half");
+    Ok(())
+}
+
+/// A window's title, desktop and place.
+type Titled = (String, usize, (i32, i32, i32, i32));
+
+/// #952: two terminals of one application, each started again in its
+/// folder, take each its own place, whichever shows first: the first
+/// saved, started first, here shows last.
+#[test]
+fn terminals_of_one_application_take_each_their_own_place() -> anyhow::Result<()> {
+    let tree = Tree::new()?;
+    tree.restored_entry(APP, 1)?;
+    let (first, second) = (tree.path("first"), tree.path("second"));
+    for folder in [&first, &second] {
+        std::fs::create_dir_all(folder)?;
+    }
+    std::fs::write(first.join("late-ms"), "700")?;
+    let window = |desktop: usize, place: [i32; 4], folder: &PathBuf| {
+        format!(
+            "[[window]]\nentry = \"{APP}\"\napp-id = \"{APP}\"\nscreen = \"HEADLESS-1\"\n\
+             desktop = {desktop}\nplace = {place:?}\n[window.terminal]\nfolder = {:?}\n",
+            folder.display().to_string()
+        )
+    };
+    tree.save(&format!(
+        "{}{}",
+        window(1, [100, 120, 600, 400], &first),
+        window(2, [700, 300, 500, 350], &second)
+    ))?;
+    let mut hp = session(&tree, &two(), tree.config(), false)?;
+    bar(&mut hp)?;
+    let titled = |hp: &Headless| -> Vec<Titled> {
+        let mut out: Vec<_> = hp
+            .placements()
+            .into_iter()
+            .filter(|p| p.app_id.as_deref() == Some(APP))
+            .map(|p| {
+                (
+                    hp.window_title(p.id),
+                    p.desktop,
+                    (p.rect.x, p.rect.y, p.rect.width, p.rect.height),
+                )
+            })
+            .collect();
+        out.sort();
+        out
+    };
+    let expected = vec![
+        ("first".to_owned(), 0, (100, 120, 600, 400)),
+        ("second".to_owned(), 1, (700, 300, 500, 350)),
+    ];
+    let back = hp.dispatch_until(WAIT, |hp| !hp.session_restoring() && titled(hp) == expected)?;
+    anyhow::ensure!(back, "{:?}\nnot\n{expected:?}", titled(&hp));
     Ok(())
 }
 
