@@ -27,7 +27,7 @@ use smithay::{
 
 use crate::{
     State,
-    model::{Mode, Zone},
+    model::{Mode, WindowId, Zone},
 };
 
 /// How long the pointer rests against the edge before the bar comes in
@@ -283,20 +283,31 @@ impl State {
     /// the work area, the wallpaper with it (the garland across its top,
     /// #813; the moments, #800).
     pub(crate) fn maximized_shown(&self, output: &Output) -> bool {
-        self.windows_on(output).into_iter().any(|id| {
-            !self.model.is_minimized(id)
-                && self.on_current_desktop(id)
-                && self.model.mode(id) == Mode::Snapped(Zone::Maximized)
-        })
+        self.shown_on(output)
+            .any(|id| self.model.mode(id) == Mode::Snapped(Zone::Maximized))
     }
 
     /// Whether the window in front on `output`'s desktop is fullscreen.
+    /// Asked at each turn of the loop and each scene: with no window
+    /// fullscreen, no window's screen is looked for (#948).
     pub(crate) fn fullscreen_in_front(&self, output: &Output) -> bool {
-        self.windows_on(output)
-            .into_iter()
-            .rev()
-            .find(|id| !self.model.is_minimized(*id) && self.on_current_desktop(*id))
-            .is_some_and(|id| self.model.mode(id) == Mode::Fullscreen)
+        let fullscreen = |id: &WindowId| self.model.mode(*id) == Mode::Fullscreen;
+        self.model.stack().iter().any(fullscreen)
+            && self
+                .shown_on(output)
+                .next()
+                .is_some_and(|id| fullscreen(&id))
+    }
+
+    /// The windows shown on `output`'s desktop, not minimised, front
+    /// first: each window's screen found once (#948).
+    fn shown_on<'a>(&'a self, output: &'a Output) -> impl Iterator<Item = WindowId> + 'a {
+        let current = self.strip(output).current();
+        self.model.stack().iter().rev().copied().filter(move |id| {
+            !self.model.is_minimized(*id)
+                && self.model.desktop(*id) == current
+                && self.output_of(*id).as_ref() == Some(output)
+        })
     }
 }
 
