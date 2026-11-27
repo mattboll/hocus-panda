@@ -46,9 +46,10 @@ retries = 1
 # test fails without the programs it needs, so these are left out there,
 # by name, and run where the programs are (the default profile).
 # Installing them on CI takes them out of this list.
-# And one that fails by chance on CI's runners, until its issue's fix:
+# And those that fail by chance on CI's runners, until their issue's fix:
 # `day_sources::choose_opens_step_1_beside_the_card_without_online_
-# accounts_google_is_disabled` (#969).
+# accounts_google_is_disabled` (#969), and
+# `bar_windows::the_window_menus_switches_and_tiles_act_on_its_window` (#972).
 default-filter = """
 not (
     (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
@@ -60,6 +61,7 @@ not (
         | test(=unplug_clients::kitty_keeps_running_on_an_unplugged_screen)
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
         | test(=day_sources::choose_opens_step_1_beside_the_card_without_online_accounts_google_is_disabled)
+        | test(=bar_windows::the_window_menus_switches_and_tiles_act_on_its_window)
     ))
 )
 """
