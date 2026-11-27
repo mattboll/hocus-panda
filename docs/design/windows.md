@@ -1560,7 +1560,10 @@ page, "Rouvrir les applications de la dernière session", settings.md).
   area, its desktop, where it floats (where it goes back to when it is
   snapped, maximised or fullscreen), its state, kept above, on all
   desktops, its opacity when it is not opaque (§3, #735); the windows of
-  one application in the order they opened. A window waiting for a screen gone is saved where it was on that screen.
+  one application in the order they opened. A window waiting for a
+  screen gone is saved where it was on that screen, in the state it had
+  there, and where it waits too (#952: the place, size and state the
+  user gave it on the screen it was carried to).
   Never saved: dialogs, the Settings, the shell's own surfaces, windows
   whose application has no desktop entry.
 - **When**: 3 s after windows changed (opened, closed, moved, resized,
@@ -1579,10 +1582,12 @@ page, "Rouvrir les applications de la dernière session", settings.md).
   waiting, before its first frame where it can (its size in its first
   configure): its screen, desktop, place, state, kept above, on all
   desktops; it opens there without pulsing. Its screen not there: it goes
-  to the screen it opened on, on the same-numbered desktop, at the same
-  share of the work area, in its state, and waits for its screen as a
-  window of a screen unplugged does (§12): it goes back when that screen
-  comes. 30 s after the applications started, the places not taken are
+  where it waited for it as the session ended, when it was waiting and
+  that screen is here, as it was there (#952); else to the screen it
+  opened on, on the same-numbered desktop, at the same share of the work
+  area, in its state. Either way it waits for its screen as a window of
+  a screen unplugged does (§12): it goes back when that screen comes, in
+  the place and state it had there. 30 s after the applications started, the places not taken are
   dropped.
 - **An application that does not come back** (no longer installed, its
   program would not run, it ended in error before a window, or no window

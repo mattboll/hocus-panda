@@ -6,8 +6,9 @@
 //!   its application's desktop entry, its app id, its screen (by identity,
 //!   §12), that screen's size and work area, its desktop, where it floats,
 //!   its state (floating, a zone, maximised, fullscreen), kept above, on
-//!   all desktops, its opacity (#735); the windows of an application in
-//!   the order they opened. A snapshot is taken on the loop (cheap: the
+//!   all desktops, its opacity (#735); a window waiting for its screen
+//!   gone, its place and state there, and where it waits (#952); the
+//!   windows of an application in the order they opened. A snapshot is taken on the loop (cheap: the
 //!   model's data) a few seconds after windows changed, and as the
 //!   session ends (before log out asks the windows to close); a thread of
 //!   its own finds each window's desktop entry (the desktop files are
@@ -19,9 +20,10 @@
 //!   application starts once (not those the autostart starts: their
 //!   windows still go back), and each window that maps is matched, by its
 //!   app id, with the first of that application's saved windows still
-//!   waiting, and put back: its screen (a screen not there: the same
-//!   share of the screen it opened on, the same-numbered desktop, waiting
-//!   for its screen as one unplugged, §12), its desktop, place and state.
+//!   waiting, and put back: its screen (a screen not there: where it
+//!   waited for it, that screen here, else the same share of the screen
+//!   it opened on, the same-numbered desktop; waiting for its screen as
+//!   one unplugged, §12), its desktop, place and state.
 //!   After [`PATIENCE`], the places not taken are dropped.
 //! - An application that could not start (no entry, its program would not
 //!   run, it ended in error before a window) is skipped; once every
@@ -128,6 +130,11 @@ pub struct SavedWindow {
     /// Its opacity in percent (#735), when not opaque.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opacity: Option<u8>,
+    /// Where it waited for its screen, gone (§12), as the session ended:
+    /// shown there again at log in while its screen is still away, then
+    /// back to its screen, in the state it had there (#952).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meanwhile: Option<Shown>,
     /// A terminal's folder (§8.2), which it opens in again.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal: Option<SavedTerminal>,
@@ -157,6 +164,43 @@ pub struct SavedWindow {
     pub title: String,
     #[serde(skip)]
     pub size: (i32, i32),
+}
+
+/// Where a window is shown: its screen (by identity), that screen's size
+/// and work area, its desktop (from 1), where it floats and its state.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct Shown {
+    pub screen: String,
+    pub screen_size: [i32; 2],
+    pub area: [i32; 4],
+    pub desktop: usize,
+    pub place: [i32; 4],
+    pub state: Shape,
+}
+
+impl Shown {
+    /// Where `w` goes on its own screen.
+    fn of(w: &SavedWindow) -> Self {
+        Self {
+            screen: w.screen.clone(),
+            screen_size: w.screen_size,
+            area: w.area,
+            desktop: w.desktop,
+            place: w.place,
+            state: w.state,
+        }
+    }
+}
+
+/// Where a window of the last session is put back: on its own screen,
+/// where it waited for it as the session ended, or elsewhere, its screen
+/// and that one away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum At<'a> {
+    Home,
+    Meanwhile(&'a Shown),
+    Elsewhere,
 }
 
 /// A terminal window's folder.
@@ -1048,36 +1092,59 @@ impl State {
         (saved.state == Shape::Floating).then(|| (saved.place[2].max(1), saved.place[3].max(1)))
     }
 
-    /// Puts window `id` where `saved` says.
+    /// Puts window `id` where `saved` says: on its screen; that screen
+    /// away, where it waited for it as the session ended when that screen
+    /// is here (#952), else the same share of the screen it opened on,
+    /// waiting for its own all the same.
     fn session_put_back(&mut self, id: WindowId, saved: &SavedWindow) {
-        let here = self
-            .connector_of(&saved.screen)
-            .and_then(|name| self.space.outputs().find(|o| o.name() == name).cloned());
-        let gone = here.is_none();
-        let Some(output) = here.or_else(|| self.output_of(id)) else {
-            return;
+        let screen = |key: &str| {
+            self.connector_of(key)
+                .and_then(|name| self.space.outputs().find(|o| o.name() == name).cloned())
         };
+        let home = Shown::of(saved);
+        let (output, at) = match screen(&saved.screen) {
+            Some(output) => (output, At::Home),
+            None => match saved
+                .meanwhile
+                .as_ref()
+                .and_then(|m| Some((screen(&m.screen)?, m)))
+            {
+                Some((output, meanwhile)) => (output, At::Meanwhile(meanwhile)),
+                None => {
+                    let Some(output) = self.output_of(id) else {
+                        return;
+                    };
+                    (output, At::Elsewhere)
+                }
+            },
+        };
+        let (spot, found) = match at {
+            At::Home => (&home, true),
+            At::Meanwhile(m) => (m, true),
+            At::Elsewhere => (&home, false),
+        };
+        let gone = at != At::Home;
         let (Some(geometry), Some(area)) = (
             self.space.output_geometry(&output).map(rect_of),
             self.work_area(&output),
         ) else {
             return;
         };
-        let mode = saved.state.mode();
-        let desktop = saved.desktop.saturating_sub(1);
-        let place = rect(saved.place);
+        let mode = spot.state.mode();
+        let desktop = spot.desktop.saturating_sub(1);
+        let place = rect(spot.place);
         // A file without its screen's work area (written by hand): the
         // screen as it is.
-        let known = saved.area[2] > 0 && saved.area[3] > 0;
+        let known = spot.area[2] > 0 && spot.area[3] > 0;
         let saved_area = if known {
-            rect(saved.area)
+            rect(spot.area)
         } else {
             Rect::new(0, 0, geometry.width, geometry.height)
         };
         // The same place on a screen of the same size, the same share of
         // another (windows.md §12).
-        let same = saved.screen_size == [geometry.width, geometry.height] || !known;
-        let floating = if !gone && same {
+        let same = spot.screen_size == [geometry.width, geometry.height] || !known;
+        let floating = if found && same {
             shifted(place, geometry, 1)
         } else {
             model::carried(place, saved_area, area)
@@ -1093,6 +1160,7 @@ impl State {
             app = saved.app_id,
             screen = saved.screen,
             gone,
+            meanwhile = matches!(at, At::Meanwhile(_)),
             desktop = desktop + 1,
             ?mode,
             ?placed,
@@ -1119,11 +1187,18 @@ impl State {
             self.set_opacity(id, percent);
         }
         if gone && let Some(put) = self.put_now(id) {
+            // Its own screen's place, to go back to.
+            let place = rect(home.place);
+            let mode = home.state.mode();
             let came = CameFrom {
                 output: saved.screen.clone(),
-                desktop,
-                size: (saved.screen_size[0], saved.screen_size[1]),
-                area: saved_area,
+                desktop: home.desktop.saturating_sub(1),
+                size: (home.screen_size[0], home.screen_size[1]),
+                area: if home.area[2] > 0 && home.area[3] > 0 {
+                    rect(home.area)
+                } else {
+                    Rect::new(0, 0, geometry.width, geometry.height)
+                },
                 rect: place,
                 restore: (mode != Mode::Floating).then_some(place),
                 mode,
@@ -1542,44 +1617,64 @@ impl State {
         {
             return None;
         }
-        let mode = self.model.mode(id);
         let above = self.model.is_above(id);
         let everywhere = self.model.is_everywhere(id);
         let opacity = Some(managed.opacity).filter(|p| *p < crate::opacity::FULL);
-        // Waiting for its screen gone: where it was there.
-        if let Some(came) = managed
+        let shown = self.shown(id);
+        // Waiting for its screen gone: where it was there, in the state it
+        // had there, which it goes back to (#952, decided 2026-11-25); and
+        // where it waits, which it is shown in again meanwhile.
+        let (home, meanwhile) = match managed
             .came_from
             .as_ref()
             .filter(|c| self.still_put_where(id, c))
         {
-            let place = match mode {
-                Mode::Floating => came.rect,
-                _ => came.restore.unwrap_or(came.rect),
-            };
-            return Some(SavedWindow {
-                entry: String::new(),
-                app_id: app,
-                screen: came.output.clone(),
-                screen_size: [came.size.0, came.size.1],
-                area: array(came.area),
-                desktop: came.desktop + 1,
-                place: array(place),
-                state: Shape::of(mode),
-                above,
-                everywhere,
-                opacity,
-                terminal: None,
-                browser: None,
-                agent: None,
-                herdr: None,
-                pid: self.pid_of(&managed.window),
-                title: crate::windows::title_of(self, id),
-                size: self.home_rect(id).map_or((0, 0), |r| (r.width, r.height)),
-            });
-        }
+            Some(came) => {
+                let place = match came.mode {
+                    Mode::Floating => came.rect,
+                    _ => came.restore.unwrap_or(came.rect),
+                };
+                let home = Shown {
+                    screen: came.output.clone(),
+                    screen_size: [came.size.0, came.size.1],
+                    area: array(came.area),
+                    desktop: came.desktop + 1,
+                    place: array(place),
+                    state: Shape::of(came.mode),
+                };
+                (home, shown)
+            }
+            None => (shown?, None),
+        };
+        Some(SavedWindow {
+            entry: String::new(),
+            app_id: app,
+            screen: home.screen,
+            screen_size: home.screen_size,
+            area: home.area,
+            desktop: home.desktop,
+            place: home.place,
+            state: home.state,
+            above,
+            everywhere,
+            opacity,
+            meanwhile,
+            terminal: None,
+            browser: None,
+            agent: None,
+            herdr: None,
+            pid: self.pid_of(&managed.window),
+            title: crate::windows::title_of(self, id),
+            size: self.home_rect(id).map_or((0, 0), |r| (r.width, r.height)),
+        })
+    }
+
+    /// Where window `id` is shown now, as saved.
+    fn shown(&self, id: WindowId) -> Option<Shown> {
         let output = self.output_of(id)?;
         let geometry = rect_of(self.space.output_geometry(&output)?);
         let area = self.work_area(&output)?;
+        let mode = self.model.mode(id);
         let place = match mode {
             Mode::Floating => self.target_rect(id)?,
             _ => self
@@ -1588,25 +1683,13 @@ impl State {
                 .restore
                 .or_else(|| self.home_rect(id))?,
         };
-        Some(SavedWindow {
-            entry: String::new(),
-            app_id: app,
+        Some(Shown {
             screen: self.screen_key(&output.name()),
             screen_size: [geometry.width, geometry.height],
             area: array(shifted(area, geometry, -1)),
             desktop: self.model.desktop(id) + 1,
             place: array(shifted(place, geometry, -1)),
             state: Shape::of(mode),
-            above,
-            everywhere,
-            opacity,
-            terminal: None,
-            browser: None,
-            agent: None,
-            herdr: None,
-            pid: self.pid_of(&managed.window),
-            title: crate::windows::title_of(self, id),
-            size: self.home_rect(id).map_or((0, 0), |r| (r.width, r.height)),
         })
     }
 }
@@ -2330,6 +2413,15 @@ mod tests {
             above: desktop == 2,
             everywhere: false,
             opacity: (desktop == 2).then_some(60),
+            // Waiting for its screen on the laptop's, maximised there.
+            meanwhile: (desktop == 2).then(|| Shown {
+                screen: "BOE NE160QDM 0".into(),
+                screen_size: [2560, 1600],
+                area: [0, 0, 2560, 1600],
+                desktop: 2,
+                place: [10, 10, 800, 600],
+                state: Shape::Maximized,
+            }),
             terminal: None,
             browser: None,
             agent: None,
@@ -2361,6 +2453,7 @@ mod tests {
         let text = saved.text();
         assert!(text.contains("[window.terminal]"), "{text}");
         assert!(text.contains("[[project]]"), "{text}");
+        assert!(text.contains("[window.meanwhile]"), "{text}");
         assert_eq!(Saved::parse(&text)?, saved);
         // Each application once, each terminal on its own in its folder.
         let starts: Vec<(String, Option<PathBuf>)> = starts_of(&saved.windows)

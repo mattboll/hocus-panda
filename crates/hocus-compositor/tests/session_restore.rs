@@ -326,6 +326,68 @@ fn a_window_of_a_screen_not_there_goes_back_once_it_comes() -> anyhow::Result<()
     Ok(())
 }
 
+/// #952, from the maintainer's evenings: a half of the external screen
+/// comes to the laptop's as that screen is unplugged, and is maximised
+/// there; the session ends. At the next log in, on the laptop alone, it
+/// comes back maximised where it was, and the external screen plugged in
+/// takes it back as its half (it came back maximised there). Saved while
+/// it waits, a log in with both screens puts it in its half at once.
+#[test]
+fn a_window_waiting_for_its_screen_comes_back_as_it_was_on_each() -> anyhow::Result<()> {
+    let tree = Tree::new()?;
+    tree.restored_entry(APP, 1)?;
+    let back = |hp: &mut Headless| -> anyhow::Result<()> {
+        let back = hp.dispatch_until(WAIT, |hp| {
+            !hp.session_restoring() && kept(hp, APP).len() == 1
+        })?;
+        anyhow::ensure!(back, "not back: {:?}", hp.placements());
+        Ok(())
+    };
+    let (half, laptop) = {
+        let mut hp = session(&tree, &two(), tree.config(), false)?;
+        bar(&mut hp)?;
+        let area = hp.work_area_of("HEADLESS-2").expect("an area");
+        hp.pointer_move(f64::from(area.x + 200), f64::from(area.y + 200));
+        open(&mut hp, APP, (500, 400))?;
+        common::chord(&mut hp, &[common::KEY_LEFTMETA, common::KEY_LEFT]);
+        wait(&mut hp, Duration::from_millis(50))?;
+        let half = kept(&hp, APP);
+        assert_eq!(half[0].mode, format!("{:?}", Mode::Snapped(Zone::Left)));
+        assert_eq!(half[0].output.as_deref(), Some("HEADLESS-2"));
+        hp.unplug("HEADLESS-2")?;
+        wait(&mut hp, Duration::from_millis(50))?;
+        common::chord(&mut hp, &[common::KEY_LEFTMETA, common::KEY_UP]);
+        wait(&mut hp, Duration::from_millis(50))?;
+        let laptop = kept(&hp, APP);
+        assert_eq!(laptop[0].output.as_deref(), Some("HEADLESS-1"));
+        assert_eq!(
+            laptop[0].mode,
+            format!("{:?}", Mode::Snapped(Zone::Maximized))
+        );
+        hp.save_session()?;
+        (half, laptop)
+    };
+
+    // On the laptop alone: as it was there; then saved, waiting.
+    {
+        let mut hp = session(&tree, &two()[..1], tree.config(), false)?;
+        bar(&mut hp)?;
+        back(&mut hp)?;
+        assert_eq!(kept(&hp, APP), laptop, "as it was on the laptop");
+        hp.save_session()?;
+        hp.plug_screen("HEADLESS-2", OutputSpec::new(2560, 1440), None)?;
+        let returned = hp.dispatch_until(WAIT, |hp| kept(hp, APP) == half)?;
+        anyhow::ensure!(returned, "{:?}\nnot its half\n{half:?}", kept(&hp, APP));
+    }
+
+    // Both screens there: in its half at once.
+    let mut hp = session(&tree, &two(), tree.config(), false)?;
+    bar(&mut hp)?;
+    back(&mut hp)?;
+    assert_eq!(kept(&hp, APP), half, "its half");
+    Ok(())
+}
+
 /// An application the autostart starts is not started again; its window
 /// still goes back.
 #[test]
