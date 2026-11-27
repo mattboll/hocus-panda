@@ -75,7 +75,8 @@ pipewire.workspace = true
 # CLOCK_MONOTONIC's microseconds, systemd's timestamps' clock (#538); the
 # recording's sound pipe, a FIFO, and its ffmpeg stopped when it stalls
 # (5.10).
-rustix = { workspace = true, features = ["fs", "net", "process", "rand", "time"] }
+# A client cut off: whether its end is still open, and full (#965).
+rustix = { workspace = true, features = ["event", "fs", "net", "process", "rand", "time"] }
 serde = { workspace = true, features = ["derive"] }
 # The screens as the Settings read them (6.9), one JSON line each time.
 serde_json.workspace = true
@@ -102,6 +103,12 @@ zbus = { workspace = true, features = ["tokio", "proxy", "service"] }
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# The log written by a thread of its own, lines dropped rather than the
+# loop held when the journal is slow (#965; MIT).
+tracing-appender.workspace = true
+# smithay's, with what sets the room each client's events wait in when it
+# reads late (#965): its own Rust backend's, no libwayland.
+wayland-server = { workspace = true, features = ["libwayland_1_23"] }
 # Cursor themes' files (MIT).
 xcursor.workspace = true
 

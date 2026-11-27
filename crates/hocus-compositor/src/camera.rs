@@ -283,8 +283,17 @@ impl State {
         let remote = self.config.pipewire_remote.clone();
         let device = self.config.camera_device.clone();
         let video4linux = self.config.camera_video4linux.clone();
+        let output = self.config.program_output.clone();
         programs::on_a_thread("hocus-camera".to_owned(), move || {
-            run(&program, remote, &device, video4linux, lines, &back);
+            run(
+                &program,
+                remote,
+                &device,
+                video4linux,
+                lines,
+                &back,
+                &output,
+            );
         });
     }
 
@@ -429,6 +438,7 @@ fn run(
     video4linux: Option<PathBuf>,
     lines: mpsc::Receiver<String>,
     back: &Sender<FromProgram>,
+    output: &programs::Output,
 ) {
     let mut command = Command::new(program);
     command
@@ -436,7 +446,8 @@ fn run(
         .arg(if device.is_empty() { "auto" } else { device })
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        // Its log, a stream of its own (#965).
+        .stderr(output.desktop().err);
     if let Some(remote) = remote {
         command.arg("--remote").arg(remote);
     }

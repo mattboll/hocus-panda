@@ -110,8 +110,9 @@ impl State {
         self.voice.to = Some(to);
         self.voice.told = None;
         let remote = self.config.pipewire_remote.clone();
+        let output = self.config.program_output.clone();
         programs::on_a_thread("hocus-voice".to_owned(), move || {
-            run(&program, remote, lines, &back);
+            run(&program, remote, lines, &back, &output);
         });
     }
 
@@ -194,12 +195,14 @@ fn run(
     remote: Option<PathBuf>,
     lines: mpsc::Receiver<String>,
     back: &Sender<FromProgram>,
+    output: &programs::Output,
 ) {
     let mut command = Command::new(program);
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        // Its log, a stream of its own (#965).
+        .stderr(output.desktop().err);
     if let Some(remote) = remote {
         command.arg("--remote").arg(remote);
     }

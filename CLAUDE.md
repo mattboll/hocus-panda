@@ -200,6 +200,12 @@ target/debug/hocuspanda --backend headless --renderer gles --render-node /dev/dr
 RUST_LOG=hocus_compositor=debug                       # more of what it does
 ```
 
+Its log is written on stderr by a thread of its own, lines dropped rather
+than the loop held. Nested or headless, the programs it starts write
+where it does; on a virtual terminal, each into a journal stream of its
+own: the desktop's under `hocuspanda`, an application under its id or
+program (docs/architecture.md, "Where logs go").
+
 Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or
 `--config FILE`), followed live for most sections (`src/reload.rs`);
 `packaging/config.toml` lists every section and setting with its default,
@@ -518,5 +524,6 @@ scripts/vm/display-manager.sh <that .deb> chooser.png session.png   # GDM, logs 
 scripts/vm/debian.sh keys meta_l-ret             # Super+Return: a terminal
 scripts/vm/debian.sh keys meta_l-shift-e         # Super+Shift+E: back to GDM
 scripts/vm/debian.sh ssh 'journalctl --user -t hocuspanda -b'   # the session's log
+scripts/vm/debian.sh ssh 'journalctl --user -t foot -b'         # an application's (its id or program)
 scripts/vm/debian.sh down
 ```

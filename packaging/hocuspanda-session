@@ -4,7 +4,10 @@
 # virtual terminal they give it. However it ends (logging out, a failure
 # to start, a crash), this script ends with it, and so does the session:
 # the display manager comes back, never a black screen. What the
-# compositor says goes to the journal:
+# compositor says goes to the journal, through this stream alone: the
+# programs it starts get streams of their own, the desktop's under the
+# same name, each application under its own (docs/architecture.md,
+# "Where logs go"):
 #
 #   journalctl --user -t hocuspanda -b
 set -u

@@ -337,6 +337,7 @@ impl State {
         let dir = job.dir.clone();
         let device = self.config.meetings.device.clone();
         tracing::info!(id, dir = %dir.display(), device, "a meeting's text is being made");
+        let output = self.config.program_output.clone();
         programs::on_a_thread(format!("transcribe {id}"), move || {
             let mut command = Command::new(&program);
             command
@@ -346,7 +347,8 @@ impl State {
                 .arg(&device)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::inherit());
+                // Its log, a stream of its own (#965).
+                .stderr(output.desktop().err);
             if let Some(models) = &models {
                 command.arg("--models").arg(models);
             }

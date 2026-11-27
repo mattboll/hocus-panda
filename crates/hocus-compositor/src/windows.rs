@@ -613,6 +613,7 @@ impl State {
                 }
             }
         }
+        with_client_state(&window, |client| client.mapped(id, app.clone()));
         if elsewhere {
             // Its desktop out of sight: it shows there when it comes.
             self.hide(id);
@@ -759,6 +760,7 @@ impl State {
         let Some(id) = self.id_of(window) else {
             return;
         };
+        with_client_state(window, |client| client.unmapped(id));
         self.perf.event(
             hocus_perf::EventKind::WindowClosed,
             app_id(window).unwrap_or_default(),
@@ -1964,5 +1966,16 @@ pub fn set_states(
     });
     if toplevel.is_initial_configure_sent() {
         toplevel.send_pending_configure();
+    }
+}
+
+/// `f` on what the compositor keeps of `window`'s client, while that
+/// client is there; an X11 window's is XWayland's, which keeps none.
+fn with_client_state(window: &Window, f: impl FnOnce(&crate::state::ClientState)) {
+    let Some(client) = window.wl_surface().and_then(|s| s.client()) else {
+        return;
+    };
+    if let Some(state) = client.get_data::<crate::state::ClientState>() {
+        f(state);
     }
 }

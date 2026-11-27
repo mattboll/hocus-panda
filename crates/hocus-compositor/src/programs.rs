@@ -10,7 +10,11 @@
 
 use std::{
     ffi::OsStr,
-    os::unix::fs::PermissionsExt,
+    io::Write,
+    os::{
+        fd::OwnedFd,
+        unix::{fs::PermissionsExt, net::UnixStream},
+    },
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -58,6 +62,133 @@ pub fn default_signals(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// The journal's socket for programs' output, as systemd-cat uses it.
+pub const JOURNAL_STREAMS: &str = "/run/systemd/journal/stdout";
+
+/// The name the desktop's own programs write under in the journal, the
+/// compositor's (`packaging/hocuspanda-session`): `journalctl --user -t
+/// hocuspanda` shows them all.
+pub const DESKTOP_LOG: &str = "hocuspanda";
+
+/// Where the programs the compositor starts write their stdout and stderr
+/// (#965).
+///
+/// In a session, the compositor's stderr is a pipe to the journal: a
+/// program writing there in turn with the others, and the compositor
+/// with them, waits when the journal is slow, and an application waiting
+/// on its stderr stops reading its Wayland connection.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Output {
+    /// Where the compositor writes: nested or headless, a developer's
+    /// terminal or a test's output.
+    #[default]
+    Shared,
+    /// The journal, through its socket at this path ([`JOURNAL_STREAMS`]):
+    /// a stream of its own for each program, under its name. The
+    /// session's.
+    Journal(PathBuf),
+}
+
+/// A program's stdout and stderr.
+#[derive(Debug)]
+pub struct Streams {
+    pub out: Stdio,
+    pub err: Stdio,
+}
+
+impl Streams {
+    fn inherited() -> Self {
+        Self {
+            out: Stdio::inherit(),
+            err: Stdio::inherit(),
+        }
+    }
+
+    /// `cmd` writes there.
+    pub fn on(self, cmd: &mut Command) -> &mut Command {
+        cmd.stdout(self.out).stderr(self.err)
+    }
+}
+
+impl Output {
+    /// A program of the desktop's own (the shell, the camera, the
+    /// microphone, the transcriber): a stream of its own under
+    /// [`DESKTOP_LOG`]; the compositor's when the journal takes none.
+    pub fn desktop(&self) -> Streams {
+        self.journal(DESKTOP_LOG).unwrap_or_else(Streams::inherited)
+    }
+
+    /// An application, `name` its desktop entry's id or its program's
+    /// name: a stream of its own under that name (`journalctl --user -t
+    /// NAME`); nowhere when the journal takes none, never the
+    /// compositor's.
+    pub fn application(&self, name: &str) -> Streams {
+        match self {
+            Self::Shared => Streams::inherited(),
+            Self::Journal(_) => self.journal(name).unwrap_or_else(|| Streams {
+                out: Stdio::null(),
+                err: Stdio::null(),
+            }),
+        }
+    }
+
+    /// A journal stream named `name`, when there is a journal and it
+    /// takes it.
+    fn journal(&self, name: &str) -> Option<Streams> {
+        let Self::Journal(socket) = self else {
+            return None;
+        };
+        match journal_stream(socket, name) {
+            Ok(fd) => {
+                let out = fd.try_clone().ok()?;
+                Some(Streams {
+                    out: Stdio::from(out),
+                    err: Stdio::from(fd),
+                })
+            }
+            Err(err) => {
+                tracing::debug!(%err, name, "the journal took no stream for a program");
+                None
+            }
+        }
+    }
+}
+
+/// A stream into the journal at `socket`, its lines under `name`, at the
+/// info level unless a line says its own (`<3>`), as systemd-cat's
+/// (`sd_journal_stream_fd`). Never waits: a journal too busy to take it
+/// now gives none.
+fn journal_stream(socket: &Path, name: &str) -> std::io::Result<OwnedFd> {
+    use rustix::net::{AddressFamily, SocketAddrUnix, SocketFlags, SocketType};
+    let fd = rustix::net::socket_with(
+        AddressFamily::UNIX,
+        SocketType::STREAM,
+        SocketFlags::CLOEXEC | SocketFlags::NONBLOCK,
+        None,
+    )?;
+    rustix::net::connect(&fd, &SocketAddrUnix::new(socket)?)?;
+    let mut stream = UnixStream::from(fd);
+    // One line each: the name, no unit, the priority (info), the level
+    // prefix read, and nothing forwarded to syslog, the kernel's log or
+    // the console. A name holds no line's end.
+    let name: String = name
+        .chars()
+        .map(|c| if c.is_control() { '_' } else { c })
+        .collect();
+    stream.write_all(format!("{name}\n\n6\n1\n0\n0\n0\n").as_bytes())?;
+    stream.shutdown(std::net::Shutdown::Read)?;
+    // The program writes as it would to a terminal: waiting when full.
+    stream.set_nonblocking(false)?;
+    Ok(OwnedFd::from(stream))
+}
+
+/// The name a shell command's program writes under: its first word's
+/// file name.
+fn program_name(command: &str) -> &str {
+    let first = command.split_whitespace().next().unwrap_or(command);
+    first.rsplit('/').next().unwrap_or(first)
+}
+
 /// What a started program is told about the compositor.
 #[derive(Debug, Clone)]
 pub struct Env {
@@ -76,6 +207,8 @@ pub struct Env {
     pub config: Option<PathBuf>,
     /// `LANGUAGE`, when `[locale] language` is not the system's (#402).
     pub language: Option<&'static str>,
+    /// Where it writes its output (#965).
+    pub output: Output,
 }
 
 impl Env {
@@ -92,6 +225,7 @@ impl Env {
             },
             config: state.config.file.clone(),
             language: state.config.locale.language.env(),
+            output: state.config.program_output.clone(),
         }
     }
 
@@ -299,6 +433,7 @@ fn command_for(
     if !launch.dir.is_empty() && Path::new(&launch.dir).is_dir() {
         cmd.current_dir(&launch.dir);
     }
+    env.output.application(&launch.id).on(&mut cmd);
     Some(cmd)
 }
 
@@ -327,9 +462,8 @@ pub fn spawn_terminal_in(configured: String, folder: PathBuf, env: Env) {
             tracing::warn!("no terminal in PATH; set [programs] terminal in config.toml");
             return;
         };
-        let program = command.split_whitespace().next().unwrap_or_default();
-        let program = program.rsplit('/').next().unwrap_or(program);
-        let extra: Vec<String> = crate::terminals::in_folder(program, &[], &folder)
+        let program = program_name(&command).to_owned();
+        let extra: Vec<String> = crate::terminals::in_folder(&program, &[], &folder)
             .into_iter()
             .map(|a| format!("'{}'", a.replace('\'', "'\\''")))
             .collect();
@@ -340,6 +474,7 @@ pub fn spawn_terminal_in(configured: String, folder: PathBuf, env: Env) {
         };
         let mut cmd = env.command("/bin/sh");
         cmd.arg("-c").arg(&command).current_dir(&folder);
+        env.output.application(&program).on(&mut cmd);
         match cmd.spawn() {
             Ok(mut child) => {
                 tracing::info!(pid = child.id(), "a terminal in a project's folder");
@@ -378,6 +513,7 @@ pub fn on_a_thread(name: String, work: impl FnOnce() + Send + 'static) {
 fn run(command: &str, env: &Env) {
     let mut cmd = env.command("/bin/sh");
     cmd.arg("-c").arg(command);
+    env.output.application(program_name(command)).on(&mut cmd);
     match cmd.spawn() {
         Ok(mut child) => {
             tracing::info!(command, pid = child.id(), "started");
@@ -440,7 +576,67 @@ mod tests {
             session_bus: None,
             config: Some(PathBuf::from("/home/alex/.config/hocuspanda/config.toml")),
             language: None,
+            output: Output::Shared,
         }
+    }
+
+    /// What the journal at `socket` read on its first stream: what was
+    /// said before its lines, and its lines.
+    fn journal_read(listener: &std::os::unix::net::UnixListener) -> anyhow::Result<String> {
+        use std::io::Read;
+        let (mut stream, _) = listener.accept()?;
+        let mut text = String::new();
+        stream.read_to_string(&mut text)?;
+        Ok(text)
+    }
+
+    #[test]
+    fn an_application_writes_into_a_journal_stream_of_its_own() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let socket = dir.path().join("stdout");
+        let listener = std::os::unix::net::UnixListener::bind(&socket)?;
+        let output = Output::Journal(socket);
+        let mut cmd = Command::new("/bin/sh");
+        cmd.arg("-c").arg("echo out; echo err >&2");
+        output.application("org.example.App").on(&mut cmd);
+        let status = cmd.status()?;
+        assert!(status.success());
+        // The command keeps its copy of the stream until it goes.
+        drop(cmd);
+        assert_eq!(
+            journal_read(&listener)?,
+            "org.example.App\n\n6\n1\n0\n0\n0\nout\nerr\n"
+        );
+        // The desktop's own under the compositor's name.
+        let mut cmd = Command::new("/bin/sh");
+        cmd.arg("-c").arg("echo said");
+        output.desktop().on(&mut cmd);
+        assert!(cmd.status()?.success());
+        drop(cmd);
+        assert_eq!(
+            journal_read(&listener)?,
+            "hocuspanda\n\n6\n1\n0\n0\n0\nsaid\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn without_a_journal_an_application_writes_nowhere_and_still_runs() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let output = Output::Journal(dir.path().join("none"));
+        let mut cmd = Command::new("/bin/sh");
+        cmd.arg("-c").arg("echo out; echo err >&2");
+        output.application("org.example.App").on(&mut cmd);
+        let out = cmd.output()?;
+        assert!(out.status.success());
+        assert!(out.stdout.is_empty() && out.stderr.is_empty(), "{out:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_command_writes_under_its_program_s_name() {
+        assert_eq!(program_name("/usr/bin/kitty -1 --title x"), "kitty");
+        assert_eq!(program_name("foot"), "foot");
     }
 
     /// The signals `/proc` says process `pid` has blocked, once it has

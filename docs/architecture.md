@@ -137,6 +137,23 @@ channel. One crate is vendored with a patch, `iced_tiny_skia`
   in the keyring of the bus the compositor names, else in a `0600` file
   beside the history (`clipboard.key`).
 
+## Where logs go
+
+In a session, the compositor's stderr is a pipe to the journal
+(`systemd-cat --identifier=hocuspanda`, `packaging/hocuspanda-session`).
+It writes its log from a thread of its own (`tracing-appender`), and drops
+lines rather than wait when the journal is slow: the loop never waits for
+its log (#965). Every program it starts gets a journal stream of its own,
+never the compositor's pipe: the shell, the camera, the microphone and
+the transcriber under the compositor's name, so that `journalctl --user
+-t hocuspanda` shows the desktop; an application under its desktop
+entry's id (`org.mozilla.firefox`) or its program's name (`kitty`), which
+the compositor's `started` line names with its pid: `journalctl --user -t
+org.mozilla.firefox`. With no journal to take a stream, an application
+writes nowhere and the desktop's programs where the compositor writes.
+Nested or headless, they all write where the compositor does (a
+terminal, a test's output).
+
 ## The event loop
 
 The rules in [CLAUDE.md](../CLAUDE.md), "Hard rules", in short: the

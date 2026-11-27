@@ -55,7 +55,7 @@ pub fn insert(
                     );
                     let client = ClientState {
                         data_control,
-                        ..ClientState::default()
+                        ..ClientState::of(&stream)
                     };
                     if let Err(err) = app
                         .state

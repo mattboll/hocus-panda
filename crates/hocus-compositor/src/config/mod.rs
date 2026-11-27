@@ -269,6 +269,11 @@ pub struct Config {
     /// name their own).
     #[serde(skip)]
     pub data_control: Vec<crate::data_control::Allowed>,
+    /// Where the programs it starts write (#965): the journal, a stream
+    /// each, in a session; where the compositor writes otherwise. Not
+    /// part of the file.
+    #[serde(skip)]
+    pub program_output: crate::programs::Output,
 }
 
 /// Where the shutter's programs are found.

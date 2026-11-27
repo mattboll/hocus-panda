@@ -167,6 +167,7 @@ mod settings_time;
 mod settings_wallpaper;
 mod settings_weather;
 mod sharing;
+mod slow_clients;
 mod snow;
 mod soak;
 mod tasks;
