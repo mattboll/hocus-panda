@@ -5,8 +5,12 @@
 //!
 //! - **A terminal** is a window whose desktop entry has `TerminalEmulator`
 //!   (or `Terminal`) in its `Categories`, or whose app id is in [`TABLE`].
-//! - **Its folder**: the Wayland client's process, its children that have
-//!   a controlling terminal (the shells), and their `/proc/PID/cwd`. A
+//! - **Its folder**: the Wayland client's process, its children that lead
+//!   a session of their own on a controlling terminal (the shells; not
+//!   the helpers the emulator keeps on its own terminal, kitty's
+//!   `kitten`s, in the folder it started in, #967), and the folder of the
+//!   program in each one's foreground (herdr, an agent; else the shell's
+//!   own), as it is when it is read: `/proc/PID/cwd`. A
 //!   process serving one window: its first shell's folder (a window with
 //!   tabs or splits comes back as one window). A process serving several
 //!   (`footclient`'s server, kitty's single instance,
@@ -163,6 +167,8 @@ pub struct Stat {
     pub pid: u32,
     pub ppid: u32,
     pub pgrp: i32,
+    /// Its session.
+    pub session: i32,
     /// Its controlling terminal, 0 none.
     pub tty: i32,
     /// Its terminal's foreground process group, -1 none.
@@ -184,14 +190,15 @@ pub fn parse_stat(line: &str) -> Option<Stat> {
         pid,
         ppid: at(4)?.parse().ok()?,
         pgrp: at(5)?.parse().ok()?,
+        session: at(6)?.parse().ok()?,
         tty: at(7)?.parse().ok()?,
         tpgid: at(8)?.parse().ok()?,
         start: at(22)?.parse().ok()?,
     })
 }
 
-/// A shell of a terminal: its process, its folder, the program in its
-/// foreground.
+/// A shell of a terminal: its process, the folder of what runs in its
+/// foreground (the program, else itself), that program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shell {
     pub stat: Stat,
@@ -266,16 +273,23 @@ fn command_line(root: &Path, pid: i32) -> Option<String> {
 }
 
 /// The shells of terminal process `pid`, read from `/proc` (`root`): its
-/// children with a controlling terminal.
+/// children that lead a session on a controlling terminal, each in the
+/// folder of the program in its foreground, else in its own (a shell that
+/// changed folder then started herdr or an agent: that folder, #967).
 pub fn shells(root: &Path, pid: u32) -> Vec<Shell> {
+    let cwd = |pid: &dyn std::fmt::Display| {
+        std::fs::read_link(root.join(pid.to_string()).join("cwd")).ok()
+    };
     children(root, pid)
         .into_iter()
-        .filter(|s| s.tty != 0)
+        // The emulator's own helpers share its session and its terminal.
+        .filter(|s| s.tty != 0 && i32::try_from(s.pid).is_ok_and(|pid| pid == s.session))
         .filter_map(|stat| {
-            let folder = std::fs::read_link(root.join(stat.pid.to_string()).join("cwd")).ok()?;
-            let program = (stat.tpgid > 0 && stat.tpgid != stat.pgrp)
-                .then(|| command_line(root, stat.tpgid))
-                .flatten();
+            let foreground = (stat.tpgid > 0 && stat.tpgid != stat.pgrp).then_some(stat.tpgid);
+            let program = foreground.and_then(|pid| command_line(root, pid));
+            let folder = foreground
+                .and_then(|pid| cwd(&pid))
+                .or_else(|| cwd(&stat.pid))?;
             Some(Shell {
                 stat,
                 folder,
@@ -314,6 +328,7 @@ mod tests {
                 pid,
                 ppid: 1,
                 pgrp: pid as i32,
+                session: pid as i32,
                 tty: 34816,
                 tpgid: pid as i32,
                 start,
@@ -333,6 +348,7 @@ mod tests {
                 pid: 4012,
                 ppid: 4000,
                 pgrp: 4012,
+                session: 4012,
                 tty: 34817,
                 tpgid: 4100,
                 start: 987_654,
@@ -414,6 +430,60 @@ mod tests {
         argv.extend(with("org.wezfurlong.wezterm").unwrap_or_default());
         assert_eq!(argv[..5], ["wezterm", "start", "--cwd", "/srv/site", "--"]);
         assert_eq!(shell_words(&["it's".to_owned()]), "'it'\\''s'");
+    }
+
+    /// Process `pid` in `/proc` `root`: its `stat` (`parent`, `group`,
+    /// `session`, `tty`, `foreground`, `start`), its `cmdline`, its folder.
+    fn process(
+        root: &Path,
+        (pid, parent, group, session): (u32, u32, u32, u32),
+        (tty, foreground, start): (i32, i32, u64),
+        (name, folder): (&str, &Path),
+    ) -> std::io::Result<()> {
+        let dir = root.join(pid.to_string());
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(
+            dir.join("stat"),
+            format!(
+                "{pid} ({name}) S {parent} {group} {session} {tty} {foreground} \
+                 0 0 0 0 0 0 0 0 0 0 0 0 0 {start} 0 0"
+            ),
+        )?;
+        std::fs::write(dir.join("cmdline"), format!("/usr/bin/{name}\0"))?;
+        std::os::unix::fs::symlink(folder, dir.join("cwd"))
+    }
+
+    /// #967: kitty's `kitten` helpers, on its own terminal in the folder it
+    /// started in, are not its shells; a shell that changed folder and
+    /// started herdr there is read in herdr's folder, herdr its program.
+    #[test]
+    fn a_shell_is_read_in_its_foreground_programs_folder() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let root = dir.path();
+        let (old, new, sub) = (root.join("old"), root.join("new"), root.join("new/sub"));
+        std::fs::create_dir_all(&sub)?;
+        // kitty, in the session 50 it was started in, on terminal 1026.
+        process(root, (100, 1, 50, 50), (1026, 50, 10), ("kitty", &old))?;
+        process(root, (101, 100, 50, 50), (1026, 50, 20), ("kitten", &old))?;
+        // Its shell, in the new folder, herdr (in a folder of its own) in
+        // its foreground; another, idle.
+        process(root, (102, 100, 102, 102), (34816, 103, 30), ("zsh", &new))?;
+        process(
+            root,
+            (103, 102, 103, 102),
+            (34816, 103, 40),
+            ("herdr", &sub),
+        )?;
+        let found: Vec<(u32, PathBuf, Option<String>)> = shells(root, 100)
+            .into_iter()
+            .map(|s| (s.stat.pid, s.folder, s.program))
+            .collect();
+        assert_eq!(found, [(102, sub.clone(), Some("herdr".to_owned()))]);
+        // herdr left: the shell's own folder.
+        std::fs::remove_dir_all(root.join("103"))?;
+        let found: Vec<PathBuf> = shells(root, 100).into_iter().map(|s| s.folder).collect();
+        assert_eq!(found, [new]);
+        Ok(())
     }
 
     #[test]
