@@ -159,6 +159,8 @@ impl State {
             Some((layer.clone(), *since, geometry))
         });
         let motion = !self.reduced_motion() && !self.shell.software;
+        // Its corners and shadow at the text size.
+        let zoom = self.zoom_of(hocus_link::SHARE_CHOOSER_NAMESPACE);
         let (alpha, k) = match &surface {
             Some((_, since, _)) => pop(now.saturating_sub(*since), motion),
             None => (0.0, SHARE_CHOOSER_FROM),
@@ -204,7 +206,7 @@ impl State {
             if self.shell.software {
                 // The CPU's buffers have no alpha: cut to its corners.
                 let clip = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
-                let radius = (SHARE_CHOOSER_RADIUS * scale).round() as i32;
+                let radius = (SHARE_CHOOSER_RADIUS * zoom * scale).round() as i32;
                 out.extend(surfaces.into_iter().map(|e| {
                     OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped, scale))
                 }));
@@ -226,7 +228,7 @@ impl State {
                         renderer,
                         &self.textures,
                         &self.share.drawn.shadow,
-                        SHADOW,
+                        SHADOW.zoomed(zoom),
                         geometry.to_f64(),
                         scale,
                         alpha,

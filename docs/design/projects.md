@@ -85,6 +85,9 @@ Decided with the maintainer (2026-11-13):
 
 ## 2. Making a project
 
+The form, the card and the confirmation are drawn at the text size
+(`[appearance] text-scale`, 80 to 150 %, settings.md 6.2, #942), under their thumbnail or centred, inside the screen.
+
 ### 2.1 From the overview (board 1)
 
 - Under the thumbnail the pointer rests on, of a desktop that is not a

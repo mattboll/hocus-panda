@@ -27,6 +27,7 @@ use std::{
 
 use hocus_link::{EDGE, Form, MUSIC_NAMESPACE, POPOVER_NAMESPACE, ToCompositor};
 use iced::{advanced::image, window};
+use iced_exwlshell::reexport::Anchor;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::{
@@ -471,6 +472,7 @@ pub fn bar_opened(bar: &str, form: Form) -> Vec<Effect> {
         bar: bar.to_owned(),
         namespace: MUSIC_NAMESPACE,
         size,
+        anchor: Anchor::Right | Anchor::Top,
         margin: margin(top),
     }]
 }

@@ -3,7 +3,8 @@
 Status: approved 2026-11-04 (issue #416, its last comment), variant A of
 the 7.5 mockup: centred, every screen dimmed. Built since 2026-11-04: see
 [as built](#as-built). Sizes are logical pixels (the mockup is drawn
-×1.5).
+×1.5), at the text size of 100 %: at another (`[appearance] text-scale`, 80 to 150 %, settings.md 6.2, #942) the dialog, its
+corners and shadow are that many times larger.
 
 ## 1. What it is
 

@@ -4,7 +4,10 @@ Status: approved 2026-11-02 (issue #398), variant A of the 5.8 mockup:
 choose, then capture, with working handles. Built since 2026-11-03: see
 [as built](#as-built). Sizes are logical pixels, the mockup's; like the
 launcher's, they are drawn × 1.5 (`hocus_link::LAUNCHER_ZOOM`), as the
-mockup showed them on the maintainer's 2560 × 1600 screen at scale 1.
+mockup showed them on the maintainer's 2560 × 1600 screen at scale 1,
+and that many times larger again at another text size (`[appearance] text-scale`, 80 to 150 %, settings.md 6.2, #942): the
+toolbar, the thumbnail, the annotator, and what the compositor draws in
+words (the size over the area, the countdown).
 What comes after the capture, its thumbnail and its annotator, is 5.9
 ([below](#59-the-thumbnail-and-the-annotator)); recording the screen from
 the same toolbar is 5.10 ([below](#510-screen-recording)).

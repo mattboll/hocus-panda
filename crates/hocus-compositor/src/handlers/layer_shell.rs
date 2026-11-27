@@ -13,13 +13,14 @@ use smithay::{
     input::keyboard::Keycode,
     output::Output,
     reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface},
-    utils::{IsAlive, Logical, Point, SERIAL_COUNTER},
+    utils::{IsAlive, Logical, Point, SERIAL_COUNTER, Size},
     wayland::{
         compositor::with_states,
         shell::{
             wlr_layer::{
-                KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, LayerSurfaceData,
-                WlrLayerShellHandler, WlrLayerShellState,
+                Anchor, ExclusiveZone, KeyboardInteractivity, Layer,
+                LayerSurface as WlrLayerSurface, LayerSurfaceCachedState, LayerSurfaceData,
+                Margins, WlrLayerShellHandler, WlrLayerShellState,
             },
             xdg::PopupSurface,
         },
@@ -158,6 +159,141 @@ impl State {
     }
 }
 
+/// Margins that would leave layer surface `surface` no room on `output`
+/// held to it, before it is arranged: smithay would configure it with a
+/// negative size, which the client reads as a huge one and dies of (#942:
+/// a bar's piece, its margins asked again at a new text size a moment
+/// before its column gives it its new place).
+fn hold_margins(surface: &WlSurface, output: &Output, whole: Option<Size<i32, Logical>>) {
+    let zone = layer_map_for_output(output).non_exclusive_zone().size;
+    with_states(surface, |states| {
+        let mut cached = states.cached_state.get::<LayerSurfaceCachedState>();
+        let state = cached.current();
+        let room = match state.exclusive_zone {
+            ExclusiveZone::DontCare => whole.unwrap_or(zone),
+            _ => zone,
+        };
+        let m = state.margin;
+        let asked = (m.top, m.right, m.bottom, m.left);
+        let (top, right, bottom, left) = held(asked, state.anchor, (room.w, room.h));
+        if (top, right, bottom, left) != asked {
+            tracing::debug!(
+                ?asked,
+                top,
+                right,
+                bottom,
+                left,
+                "a layer surface's margins held to its screen"
+            );
+            state.margin = Margins {
+                top,
+                right,
+                bottom,
+                left,
+            };
+        }
+    });
+}
+
+/// A layer surface anchored to the bottom or the right alone, whose buffer
+/// is not yet as large as it asks to be, placed by its buffer for now: that
+/// edge's margin offset by the difference. The layer map places such a
+/// surface by the size asked, so a new size committed before the client
+/// drew at it showed the old buffer off that edge until the next buffer
+/// came: the bar's windows grew from their top, their old lines a line
+/// higher for a frame (#964). Now the old buffer stays against the edge,
+/// where it was, and the new one takes the new size's place. The client's
+/// own margins come back with its next commit.
+///
+/// For the windows' surface only: it alone keeps that edge as it grows.
+/// The popovers, anchored to the bottom too, keep their top, asking a new
+/// size and a new margin in commits of their own; held against the bottom,
+/// a popover that had not drawn at its new size yet stood off its place
+/// and took clicks there.
+fn by_its_buffer(surface: &WlSurface, output: &Output, whole: Option<Size<i32, Logical>>) {
+    let Some(drawn) = with_renderer_surface_state(surface, |s| s.surface_size()).flatten() else {
+        return;
+    };
+    let zone = layer_map_for_output(output).non_exclusive_zone().size;
+    with_states(surface, |states| {
+        let mut cached = states.cached_state.get::<LayerSurfaceCachedState>();
+        let state = cached.current();
+        let room = match state.exclusive_zone {
+            ExclusiveZone::DontCare => whole.unwrap_or(zone),
+            _ => zone,
+        };
+        let (anchor, asked, m) = (state.anchor, state.size, state.margin);
+        // The offset on an axis: none unless anchored to its far edge
+        // alone, at a size of its own that fits.
+        let offset = |near: Anchor, far: Anchor, asked: i32, drawn: i32, room: i32| {
+            let alone = anchor.contains(far) && !anchor.contains(near);
+            if alone && asked > 0 && asked <= room && drawn != asked {
+                drawn - asked
+            } else {
+                0
+            }
+        };
+        let bottom = offset(
+            Anchor::TOP,
+            Anchor::BOTTOM,
+            asked.h,
+            drawn.h,
+            room.h - m.bottom,
+        );
+        let right = offset(
+            Anchor::LEFT,
+            Anchor::RIGHT,
+            asked.w,
+            drawn.w,
+            room.w - m.right,
+        );
+        if (bottom, right) != (0, 0) {
+            tracing::debug!(
+                asked = ?(asked.w, asked.h),
+                drawn = ?(drawn.w, drawn.h),
+                "a layer surface placed by its buffer until it draws at its new size"
+            );
+            state.margin.bottom += bottom;
+            state.margin.right += right;
+        }
+    });
+}
+
+/// Margins (top, right, bottom, left) for a surface anchored to `anchor`,
+/// each axis leaving at least a pixel of `room` (width, height); the
+/// second edge's gives way first.
+fn held(
+    (mut top, mut right, mut bottom, mut left): (i32, i32, i32, i32),
+    anchor: Anchor,
+    (width, height): (i32, i32),
+) -> (i32, i32, i32, i32) {
+    let hold = |first: &mut i32, second: &mut i32, at_first: bool, at_second: bool, room: i32| {
+        let mut over = i32::from(at_first) * *first + i32::from(at_second) * *second - (room - 1);
+        for (side, anchored) in [(second, at_second), (first, at_first)] {
+            if over > 0 && anchored && *side > 0 {
+                let taken = over.min(*side);
+                *side -= taken;
+                over -= taken;
+            }
+        }
+    };
+    hold(
+        &mut top,
+        &mut bottom,
+        anchor.contains(Anchor::TOP),
+        anchor.contains(Anchor::BOTTOM),
+        height,
+    );
+    hold(
+        &mut left,
+        &mut right,
+        anchor.contains(Anchor::LEFT),
+        anchor.contains(Anchor::RIGHT),
+        width,
+    );
+    (top, right, bottom, left)
+}
+
 /// A commit of a layer surface: arranged again, configured the first time.
 pub fn handle_commit(state: &mut State, surface: &WlSurface) {
     let outputs: Vec<Output> = state.space.outputs().cloned().collect();
@@ -219,11 +355,19 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
             hocus_link::CURTAIN_NAMESPACE => state.curtain_committed(&layer, &output),
             _ => {}
         }
+        let whole = state.space.output_geometry(&output).map(|g| g.size);
+        hold_margins(surface, &output, whole);
+        if layer.namespace() == hocus_link::WINDOWS_NAMESPACE {
+            by_its_buffer(surface, &output, whole);
+        }
         let before = state.work_area(&output);
         layer_map_for_output(&output).arrange();
         if state.work_area(&output) != before {
             // Snapped, maximised and fullscreen windows follow.
             state.rearrange();
+        }
+        if layer.namespace() == hocus_link::WINDOWS_NAMESPACE {
+            state.windows_placed(&layer, &output);
         }
         let configured = with_states(surface, |states| {
             states
@@ -241,6 +385,26 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
 }
 
 impl State {
+    /// Where the windows' surface `layer` on `output` is drawn after a
+    /// commit, while a test records it (#964): its buffer, where the layer
+    /// map put it.
+    fn windows_placed(&mut self, layer: &LayerSurface, output: &Output) {
+        if self.panel.windows_places.is_none() {
+            return;
+        }
+        let drawn = with_renderer_surface_state(layer.wl_surface(), |s| s.surface_size()).flatten();
+        let origin = self.space.output_geometry(output).map(|g| g.loc);
+        let at = layer_map_for_output(output).layer_geometry(layer);
+        let (Some(size), Some(origin), Some(at)) = (drawn, origin, at) else {
+            return;
+        };
+        let rect =
+            crate::model::Rect::new(origin.x + at.loc.x, origin.y + at.loc.y, size.w, size.h);
+        if let Some(places) = self.panel.windows_places.as_mut() {
+            places.push((output.name(), rect));
+        }
+    }
+
     /// The layer surface under `pos` that stands `stand` the windows
     /// (front first), and where the surface found is.
     pub fn layer_surface_under(
@@ -264,11 +428,15 @@ impl State {
             ],
         };
         let map = layer_map_for_output(output);
+        // Each surface's layer read once, not once a pass (#948): asked at
+        // each turn of the loop, under the still pointer.
+        let layers: Vec<(&LayerSurface, Layer)> = map.layers().map(|l| (l, l.layer())).collect();
         for (layer, pick) in passes {
             if pick == Pick::Nothing {
                 continue;
             }
-            for surface in map.layers_on(layer).rev() {
+            let on = layers.iter().rev().filter(|(_, l)| *l == layer);
+            for &(surface, _) in on {
                 // The lock's surfaces take the pointer through the lock
                 // alone, while it holds (7.1).
                 if !pick.takes(surface.namespace())
@@ -472,5 +640,45 @@ impl State {
             );
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn margins(top: i32, right: i32, bottom: i32, left: i32) -> (i32, i32, i32, i32) {
+        (top, right, bottom, left)
+    }
+
+    /// #942: margins past the screen are held so that a pixel is left; the
+    /// others, and those of an edge not anchored, stay as asked.
+    #[test]
+    fn margins_past_the_screen_are_held_to_it() {
+        let right_top = Anchor::TOP | Anchor::RIGHT;
+        let room = (1920, 1080);
+        assert_eq!(
+            held(margins(1377, 12, 0, 0), right_top, room),
+            margins(1079, 12, 0, 0)
+        );
+        assert_eq!(
+            held(margins(700, 12, 0, 0), right_top, room),
+            margins(700, 12, 0, 0)
+        );
+        // Both edges anchored: the bottom gives way first.
+        let column = Anchor::TOP | Anchor::BOTTOM | Anchor::RIGHT;
+        assert_eq!(
+            held(margins(900, 12, 400, 0), column, room),
+            margins(900, 12, 179, 0)
+        );
+        // An edge not anchored takes no room.
+        assert_eq!(
+            held(
+                margins(0, 12, 5000, 3000),
+                Anchor::TOP | Anchor::RIGHT,
+                room
+            ),
+            margins(0, 12, 5000, 3000)
+        );
     }
 }

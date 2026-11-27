@@ -119,12 +119,14 @@ case where the whole suite first runs after the merge: give it the
 
 CI's profile (`[profile.ci]` in `.config/nextest.toml`) runs every test
 whatever fails before it (`fail-fast = false`): one failure used to stop
-its shard, and the next run found the next one. It retries nothing
-(`retries = 0`): a test that passes at its second try has failed once, and
-a suite that hides it gets worse without anyone seeing. So:
+its shard, and the next run found the next one. It retries a failed
+test once (`retries = 1`), so that no pull request waits on a chance
+failure; but a test that passes at its second try has failed once, and
+nextest reports it FLAKY in the run's log. A suite that hides it gets worse
+without anyone seeing, so:
 
-- A test that fails on `main` or a sprint branch and passes when run again
-  **is flaky**, whatever the reason looks like. It gets an issue the same
+- A test reported FLAKY in a run's log, or that fails on `main` or a sprint
+  branch and passes when run again, **is flaky**, whatever the reason looks like. It gets an issue the same
   day, with the run's link and what the test said.
 - While the issue is open the test is quarantined: a line of
   `default-filter` in the CI profile, with the issue's number. The default
@@ -134,8 +136,17 @@ a suite that hides it gets worse without anyone seeing. So:
   `scripts/dev/stress.sh` first (below). "It passed again" closes
   nothing.
 
-**Before a pull request**, a new or changed test passes
-`scripts/dev/stress.sh` 20 times: it runs the tests a nextest filter
+**Once a week**, not before each pull request, a timer runs
+`~/github/hocus-panda-tools/weekly-stress hocus-panda`: every test file
+changed in the last 7 days, 20 times in a row under load, and lists the
+tests CI's runs of those 7 days reported FLAKY; its report is in
+`~/.local/state/hocus-panda/weekly-stress/`. Each test it names gets an
+issue and the quarantine above. Local runs before a pull request did not keep
+CI green (28 failed runs from 2026-11-20 to 11-27, on tests stressed
+here first), and cost a third of the agents' build time.
+
+**By hand**, to reproduce a chance failure or to show that its fix holds,
+`scripts/dev/stress.sh` runs the tests a nextest filter
 selects 20 times in a row (`-n` for more), on two cores (`-c 0-1`) beside
 two busy loops pinned on the same cores (`-l`), four at a time as on CI
 (`-j`), without retries, and stops at the first failure, which it prints.

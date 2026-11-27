@@ -200,7 +200,8 @@ impl Layout {
             Tab::Windows => chooser.choose.windows.len(),
         };
         let rows = count.div_ceil(COLUMNS).max(1);
-        let room = chooser.choose.height as f32 - 2.0 * MARGIN;
+        // The screen's height in the chooser's own pixels, at the text size.
+        let room = crate::layer::from_screen(chooser.choose.height) as f32 - 2.0 * MARGIN;
         let mut rows_shown = rows.min(MOST_ROWS);
         while rows_shown > 1 && fixed(rows_shown) > room {
             rows_shown -= 1;
@@ -387,7 +388,8 @@ pub(super) fn content<'a>(chooser: &Chooser, words: Words) -> (El<'a>, Vec<Strin
     // The header.
     let app = super::app_name(&chooser.choose.app);
     let icon_name = super::entry_of(&chooser.choose.app).and_then(|e| e.icon);
-    let scale = chooser.choose.scale as f32 / 120.0;
+    // Its pixels at the text size too.
+    let scale = chooser.choose.scale as f32 / 120.0 * crate::layer::text_factor();
     let px = crate::launcher::icons::pixels(ICON_PX, scale);
     let handle = icon_name.and_then(|name| crate::launcher::icons::of(&name, px).flatten());
     let initial = app.clone().unwrap_or_else(|| "?".to_owned());

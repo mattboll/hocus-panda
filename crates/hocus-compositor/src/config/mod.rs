@@ -231,6 +231,12 @@ pub struct Config {
     /// ever opened.
     #[serde(skip)]
     pub camera_video4linux: Option<PathBuf>,
+    /// The program GNOME's text size is written with for GTK applications
+    /// (#942, `gsettings`): the session's on a virtual terminal. Not part
+    /// of the file; `None` writes none (nested and headless compositors,
+    /// never the settings of the session they run in; tests give a fake).
+    #[serde(skip)]
+    pub gnome_settings: Option<PathBuf>,
     /// The Hocuspanda microphone's program (#619, lot 5, `hocus-voice`):
     /// the session's is the one beside the compositor. Not part of the
     /// file; `None` starts none (nested and headless compositors, unless
@@ -263,6 +269,11 @@ pub struct Config {
     /// name their own).
     #[serde(skip)]
     pub data_control: Vec<crate::data_control::Allowed>,
+    /// Where the programs it starts write (#965): the journal, a stream
+    /// each, in a session; where the compositor writes otherwise. Not
+    /// part of the file.
+    #[serde(skip)]
+    pub program_output: crate::programs::Output,
 }
 
 /// Where the shutter's programs are found.

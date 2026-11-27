@@ -320,9 +320,14 @@ fn fill_planka(entry: &mut Table, planka: &PlankaChoice) {
 
 /// `choice` written into the configuration file at `path` (none yet: one
 /// made with it alone), whole or not at all ([`hocus_config::edit`]).
-pub fn write(path: &Path, choice: &Choice) -> Result<String, EditError> {
+/// `before` is given the text just before it replaces the file: what has to
+/// be in place when the file changes (a board's token) is done there, since
+/// the compositor follows the file and has the day's accounts started again
+/// from it at once.
+pub fn write(path: &Path, choice: &Choice, before: impl FnOnce(&str)) -> Result<String, EditError> {
     let read = hocus_config::read(path)?;
     let written = apply(&read.text, choice)?;
+    before(&written);
     hocus_config::replace(&read.real, written.as_bytes(), read.mode).map_err(|source| {
         hocus_config::Error::Io {
             path: read.real.clone(),
@@ -546,7 +551,7 @@ terminal = "Super+Return"
         std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o600))?;
         let link = dir.path().join("config.toml");
         std::os::unix::fs::symlink(&real, &link)?;
-        write(&link, &google()).map_err(anyhow::Error::msg)?;
+        write(&link, &google(), |_| ()).map_err(anyhow::Error::msg)?;
         assert!(std::fs::symlink_metadata(&link)?.file_type().is_symlink());
         assert!(std::fs::read_to_string(&real)?.contains("alex@example.org"));
         assert_eq!(
@@ -555,9 +560,15 @@ terminal = "Super+Return"
         );
         // Nothing left beside it.
         assert_eq!(std::fs::read_dir(dir.path().join("dotfiles"))?.count(), 1);
-        // No file yet: one made.
+        // No file yet: one made, what it says given before it is there.
         let new = dir.path().join("new/config.toml");
-        write(&new, &planka("https://planka.example.org/boards/1")).map_err(anyhow::Error::msg)?;
+        let mut before = None;
+        let choice = planka("https://planka.example.org/boards/1");
+        let written = write(&new, &choice, |text| {
+            before = Some((text.to_owned(), new.exists()));
+        })
+        .map_err(anyhow::Error::msg)?;
+        assert_eq!(before, Some((written, false)));
         assert!(std::fs::read_to_string(&new)?.contains("[[day.tasks]]"));
         Ok(())
     }

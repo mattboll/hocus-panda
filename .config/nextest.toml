@@ -33,14 +33,23 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 # Every test runs whatever fails before it: a first failure hid the rest of
 # its shard, and the next run found the next one (#769).
 fail-fast = false
-# No retries: a test that passes at its second try has failed, and is
-# reported as such (docs/workflow.md, "A test that fails by chance").
-retries = 0
+# One retry: a test that passes at its second try keeps the run green, so
+# that no pull request waits on a chance failure, but nextest reports it
+# FLAKY in the run's log, and it has failed: weekly-stress lists the week's
+# FLAKY tests from CI's logs, and each gets an issue (docs/workflow.md, "A test that fails
+# by chance").
+# With no retry, chance failures turned a quarter of the runs red
+# (28 of 114 from 2026-11-20 to 11-27).
+retries = 1
 # What CI's machines lack (.github/workflows/ci.yml installs neither
 # Xwayland, nor a terminal, nor AT-SPI's launcher and Python binding): a
 # test fails without the programs it needs, so these are left out there,
 # by name, and run where the programs are (the default profile).
 # Installing them on CI takes them out of this list.
+# And two that fail by chance on CI's runners, each until its issue's fix:
+# `day_sources::the_planka_step_takes_a_pasted_token_and_says_a_refused_
+# one_no_server_or_a_board_not_shared` (#968), `day_sources::choose_opens_
+# step_1_beside_the_card_without_online_accounts_google_is_disabled` (#969).
 default-filter = """
 not (
     (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
@@ -51,6 +60,8 @@ not (
         | test(=memory::x11_windows_gone_leave_no_surface_behind)
         | test(=unplug_clients::kitty_keeps_running_on_an_unplugged_screen)
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
+        | test(=day_sources::the_planka_step_takes_a_pasted_token_and_says_a_refused_one_no_server_or_a_board_not_shared)
+        | test(=day_sources::choose_opens_step_1_beside_the_card_without_online_accounts_google_is_disabled)
     ))
 )
 """

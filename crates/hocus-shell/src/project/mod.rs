@@ -456,6 +456,15 @@ pub fn place(at: Option<Rect>, size: (u32, u32), screen: (i32, i32)) -> (i32, i3
     (x, y)
 }
 
+/// A screen's size as the compositor says it, in the pixels of the
+/// projects' surfaces at the text size: where they are placed, kept so.
+fn from_screen((width, height): (i32, i32)) -> (i32, i32) {
+    (
+        crate::layer::from_screen(width),
+        crate::layer::from_screen(height),
+    )
+}
+
 /// Where a surface `size` large opens centred on a screen `screen` large.
 pub fn centred(size: (u32, u32), screen: (i32, i32)) -> (i32, i32) {
     let (w, h) = (size.0 as i32, size.1 as i32);
@@ -679,8 +688,9 @@ impl Projects {
         }
     }
 
-    fn open_confirm(&mut self, shown: ProjectConfirm, now: Instant, effects: &mut Vec<Effect>) {
+    fn open_confirm(&mut self, mut shown: ProjectConfirm, now: Instant, effects: &mut Vec<Effect>) {
         self.close(now, effects);
+        shown.screen = from_screen(shown.screen);
         let surface = window::Id::unique();
         let size = confirm::size(&shown, words());
         let place = centred(size, shown.screen);
@@ -701,8 +711,10 @@ impl Projects {
         others_close();
     }
 
-    fn open_form(&mut self, ask: ProjectForm, now: Instant, effects: &mut Vec<Effect>) {
+    fn open_form(&mut self, mut ask: ProjectForm, now: Instant, effects: &mut Vec<Effect>) {
         self.close(now, effects);
+        ask.screen = from_screen(ask.screen);
+        ask.at = crate::layer::rect_from_screen(ask.at);
         self.serial += 1;
         let serial = self.serial;
         let surface = window::Id::unique();
@@ -742,8 +754,10 @@ impl Projects {
         others_close();
     }
 
-    fn open_card(&mut self, shown: ProjectCard, now: Instant, effects: &mut Vec<Effect>) {
+    fn open_card(&mut self, mut shown: ProjectCard, now: Instant, effects: &mut Vec<Effect>) {
         self.close(now, effects);
+        shown.screen = from_screen(shown.screen);
+        shown.at = shown.at.map(crate::layer::rect_from_screen);
         let surface = window::Id::unique();
         let size = card::size(&shown, words());
         let place = place(shown.at, size, shown.screen);

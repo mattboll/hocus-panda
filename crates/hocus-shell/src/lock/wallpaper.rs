@@ -4,8 +4,8 @@
 //! never shows windows).
 //!
 //! Drawn on a thread of its own with the compositor's function
-//! ([`hocus_link::wallpaper::render`]), at twice the lock's logical size
-//! (smooth either way); until a screen's is drawn, its previous stays, and
+//! ([`hocus_link::wallpaper::render`]), at twice the screen's logical
+//! size (smooth either way); until a screen's is drawn, its previous stays, and
 //! the plain dark before the first. Drawn, the lock's surfaces are woken.
 
 use std::{
@@ -50,6 +50,15 @@ pub fn set(wallpapers: Wallpapers) -> bool {
     changed
 }
 
+/// A size of the lock's own, twice as large in the screen's logical pixels.
+fn on_screen((width, height): (u32, u32)) -> (u32, u32) {
+    let k = 2.0 * crate::layer::text_factor();
+    (
+        (width as f32 * k).round() as u32,
+        (height as f32 * k).round() as u32,
+    )
+}
+
 /// The lock's background on `output`, `size` logical pixels large: its
 /// picture once drawn (the previous meanwhile); `None` before any.
 pub fn background(output: &str, size: (u32, u32)) -> Option<Handle> {
@@ -61,7 +70,9 @@ pub fn background(output: &str, size: (u32, u32)) -> Option<Handle> {
     let key = Key {
         look: wallpapers.lock_look(output),
         blurred: wallpapers.lock == LockLook::Blurred,
-        size: (size.0 * 2, size.1 * 2),
+        // Twice the screen's logical size whatever the text size, which
+        // the lock's own pixels are at.
+        size: on_screen(size),
     };
     let mut made = MADE.lock().unwrap_or_else(PoisonError::into_inner);
     let made = made.get_or_insert_with(Made::default);

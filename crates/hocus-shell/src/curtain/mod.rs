@@ -104,7 +104,8 @@ impl Curtain {
             effects.push(Effect::CurtainSurface {
                 id: surface,
                 output: shown.output.clone(),
-                top: shown.top,
+                // In the pill's own pixels, at the text size.
+                top: crate::layer::from_screen(shown.top),
             });
             self.pill = Some(Pill {
                 shown,

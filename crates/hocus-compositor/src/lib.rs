@@ -123,7 +123,8 @@ mod xwayland_shell;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
+use smithay::reexports::calloop::EventLoop;
+use wayland_server::Display;
 
 pub use backend::headless::{FrameCost, HeadlessConfig, RendererChoice};
 pub use capture::{Area as CaptureArea, Shown as CaptureShown, pictures_dir};
@@ -155,6 +156,7 @@ pub use lock::{Authenticator, LockState};
 pub use output_spec::{OutputSpec, ParseOutputSpecError};
 /// What every desktop's labels say and its keyboard's selection (#944).
 pub use overview::grid::{Label as GridLabel, Selection as GridSelection};
+pub use programs::{JOURNAL_STREAMS, Output as ProgramOutput};
 pub use record::{RecordInfo, Source as RecordSource};
 pub use screen_sets::Identity as ScreenIdentity;
 pub use share::ShareInfo;
@@ -257,6 +259,15 @@ impl RuntimeDir {
     }
 }
 
+/// The room a client's events wait in while it does not read them (#965),
+/// past what its socket holds: an application busy for a moment (a
+/// garbage collection, a slow write to its log) while the pointer moves
+/// over it gets them all once it reads again. 4 KiB by default, as
+/// libwayland's, which a few hundred moves fill: the client was cut off.
+/// A buffer grows only as it fills. A client that fills even this one is
+/// cut off, and the log says so (`ClientState`'s `disconnected`).
+pub const CLIENT_ROOM: usize = 1 << 20;
+
 /// A compositor ready to run.
 struct Started {
     event_loop: EventLoop<'static, App>,
@@ -268,6 +279,9 @@ fn start(options: Options) -> anyhow::Result<Started> {
     let runtime_dir = RuntimeDir::for_options(&options)?;
     let event_loop: EventLoop<App> = EventLoop::try_new().context("could not create the loop")?;
     let display: Display<State> = Display::new().context("could not create the display")?;
+    // Before any client: each takes the room its events wait in as it
+    // connects (#965).
+    display.handle().set_default_max_buffer_size(CLIENT_ROOM);
     let socket = socket::bind(runtime_dir.path())?;
     let nested = matches!(options.backend, BackendKind::Winit);
     let mut state = State::new(
@@ -305,6 +319,8 @@ fn start(options: Options) -> anyhow::Result<Started> {
         (None, _) => None,
     });
     state.start_sharing();
+    // GTK applications' text size, the session's only (#942).
+    state.gnome_text_scale();
     state.start_idle();
     state.start_away(system_bus);
     agents::start(&event_loop.handle(), &mut state)?;

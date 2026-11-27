@@ -117,6 +117,15 @@ const TOOLBAR_SHADOW: ShadowStyle = ShadowStyle {
     alpha: 0.45,
     radius: CAPTURE_TOOLBAR_RADIUS,
 };
+/// `style` `k` times as large: its rim and corners.
+fn zoomed_box(style: BoxStyle, k: f64) -> BoxStyle {
+    BoxStyle {
+        rim_width: (f64::from(style.rim_width) * k).round() as u32,
+        radius: (f64::from(style.radius) * k).round() as u32,
+        ..style
+    }
+}
+
 /// Texts drawn kept, the last ones.
 const TEXTS_KEPT: usize = 16;
 
@@ -508,12 +517,14 @@ impl State {
         if alpha <= 0.0 {
             return None;
         }
+        // Its corners and shadow at the text size.
+        let zoom = self.zoom_of(hocus_link::CAPTURE_TOOLBAR_NAMESPACE);
         let loc = geometry.loc.to_physical_precise_round(scale);
         let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
             AsRenderElements::<R>::render_elements(layer, renderer, loc, Scale::from(scale), alpha);
         if self.shell.software {
             let clip = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
-            let radius = (CAPTURE_TOOLBAR_RADIUS * scale).round() as i32;
+            let radius = (CAPTURE_TOOLBAR_RADIUS * zoom * scale).round() as i32;
             out.extend(surfaces.into_iter().map(|e| {
                 OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped, scale))
             }));
@@ -525,7 +536,7 @@ impl State {
                 renderer,
                 &self.textures,
                 &self.capture.drawn.shadow,
-                TOOLBAR_SHADOW,
+                TOOLBAR_SHADOW.zoomed(zoom),
                 geometry.to_f64(),
                 scale,
                 alpha,
@@ -555,20 +566,23 @@ impl State {
     {
         let drawn = &self.capture.drawn;
         let said = format!("{} × {}", real.0, real.1);
-        let Some(text) = drawn.text(&said, LABEL_SIZE * scale) else {
+        // At the text size (#942).
+        let k = self.text_scale().factor();
+        let (pad, above) = ((LABEL_PAD.0 * k, LABEL_PAD.1 * k), LABEL_ABOVE * k);
+        let Some(text) = drawn.text(&said, LABEL_SIZE * k * scale) else {
             return;
         };
         let (w, h) = (
             f64::from(text.size.0) / scale,
             f64::from(text.size.1) / scale,
         );
-        let box_size = (w + 2.0 * LABEL_PAD.0, h + 2.0 * LABEL_PAD.1);
-        let top = if area.y - LABEL_ABOVE >= 0.0 {
-            area.y - LABEL_ABOVE
+        let box_size = (w + 2.0 * pad.0, h + 2.0 * pad.1);
+        let top = if area.y - above >= 0.0 {
+            area.y - above
         } else {
-            area.y + LABEL_PAD.1 * 2.0
+            area.y + pad.1 * 2.0
         };
-        let at = Point::<f64, Logical>::from((area.x + LABEL_PAD.0, top + LABEL_PAD.1));
+        let at = Point::<f64, Logical>::from((area.x + pad.0, top + pad.1));
         let dst = Rectangle::new(at.to_physical_precise_round(scale), text.size.into());
         let all = Rectangle::from_size((f64::from(text.size.0), f64::from(text.size.1)).into());
         match Placed::new(renderer, &text.texture, all, dst, 1.0) {
@@ -581,7 +595,7 @@ impl State {
                 renderer,
                 &self.textures,
                 &drawn.label,
-                LABEL,
+                zoomed_box(LABEL, k),
                 backing,
                 scale,
                 1.0,
@@ -618,8 +632,11 @@ impl State {
         };
         let alpha = lerp(0.3, 1.0, t) as f32;
         let k = lerp(1.25, 1.0, t);
+        // At the text size (#942).
+        let text_k = self.text_scale().factor();
+        let disc_side = DISC * text_k;
         let (cx, cy) = (size.0 / 2.0, size.1 / 2.0);
-        if let Some(text) = drawn.text(&left.to_string(), NUMBER * scale) {
+        if let Some(text) = drawn.text(&left.to_string(), NUMBER * text_k * scale) {
             let (w, h) = (f64::from(text.size.0) * k, f64::from(text.size.1) * k);
             let centre = Point::<f64, Logical>::from((cx, cy)).to_physical(scale);
             let dst = Rectangle::new(
@@ -637,8 +654,8 @@ impl State {
             }
         }
         let disc = Rectangle::new(
-            (cx - DISC / 2.0, cy - DISC / 2.0).into(),
-            (DISC, DISC).into(),
+            (cx - disc_side / 2.0, cy - disc_side / 2.0).into(),
+            (disc_side, disc_side).into(),
         );
         // Before a recording, its red ring, over the disc.
         if record {
@@ -647,7 +664,7 @@ impl State {
                     renderer,
                     &self.textures,
                     &drawn.disc_ring,
-                    COUNT_RING,
+                    zoomed_box(COUNT_RING, text_k),
                     disc,
                     scale,
                     alpha,
@@ -661,7 +678,7 @@ impl State {
                 renderer,
                 &self.textures,
                 &drawn.disc,
-                DISC_STYLE,
+                zoomed_box(DISC_STYLE, text_k),
                 disc,
                 scale,
                 alpha,
@@ -712,7 +729,7 @@ impl State {
             r.to_physical_precise_round(scale),
             scale,
             glass.alpha,
-            CAPTURE_TOOLBAR_RADIUS,
+            CAPTURE_TOOLBAR_RADIUS * self.zoom_of(hocus_link::CAPTURE_TOOLBAR_NAMESPACE),
         )
     }
 }

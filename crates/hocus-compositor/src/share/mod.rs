@@ -1049,8 +1049,13 @@ pub(crate) struct ThumbAsk {
 }
 
 impl Sharing {
-    /// The thumbnails to draw now, if they are due.
-    pub(crate) fn take_thumbs(&mut self, scale_of: impl Fn(&str) -> f64) -> Vec<ThumbAsk> {
+    /// The thumbnails to draw now, if they are due; the chooser drawn
+    /// `zoom` times its mockup's size (the text size).
+    pub(crate) fn take_thumbs(
+        &mut self,
+        scale_of: impl Fn(&str) -> f64,
+        zoom: f64,
+    ) -> Vec<ThumbAsk> {
         if !self.thumbs_due {
             return Vec::new();
         }
@@ -1074,7 +1079,7 @@ impl Sharing {
                     (f64::from(r.width) * scale).round().max(1.0) as u32,
                     (f64::from(r.height) * scale).round().max(1.0) as u32,
                 ),
-                radius: (hocus_link::SHARE_THUMB_RADIUS - 1.0) * scale,
+                radius: (hocus_link::SHARE_THUMB_RADIUS - 1.0) * zoom * scale,
             })
             .collect()
     }

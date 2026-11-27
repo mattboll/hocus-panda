@@ -4,7 +4,9 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
+    os::{fd::OwnedFd, unix::net::UnixStream},
     path::PathBuf,
+    sync::{Mutex, PoisonError},
 };
 
 use anyhow::Context;
@@ -157,6 +159,8 @@ pub struct State {
     pub holidays: crate::holidays::Holidays,
     /// The screen reader started with the session (#734).
     pub screen_reader: crate::screen_reader::ScreenReader,
+    /// GNOME's text size, as last written for GTK applications (#942).
+    pub gnome_text: crate::appearance::gnome::GnomeText,
     /// The overview while it shows (8.5 A), and what draws it.
     pub overview: Option<crate::overview::Overview>,
     pub overview_paint: crate::overview_draw::OverviewPaint,
@@ -369,6 +373,7 @@ impl State {
             night: crate::night_light::Night::default(),
             holidays: crate::holidays::Holidays::default(),
             screen_reader: crate::screen_reader::ScreenReader::default(),
+            gnome_text: crate::appearance::gnome::GnomeText::default(),
             told_window_states: None,
             overlay: Overlay::new(),
             programs: Programs::default(),
@@ -486,18 +491,31 @@ impl State {
         if self.locked() {
             return self.lock_surface_under(pos);
         }
-        let layer = |stand| self.layer_surface_under(pos, stand).map(|(s, p, _)| (s, p));
-        layer(Stand::Above)
-            .or_else(|| {
-                // Where its surface's origin is, its geometry's corner less
-                // its client-side shadow.
-                self.space.element_under(pos).and_then(|(window, origin)| {
-                    window
-                        .surface_under(pos - origin.to_f64(), WindowSurfaceType::ALL)
-                        .map(|(s, p)| (s, (p + origin).to_f64()))
-                })
+        self.layer_surface_under(pos, Stand::Above)
+            .map(|(s, p, _)| (s, p))
+            .or_else(|| self.surface_under_windows(pos))
+    }
+
+    /// The surface under `pos` where no layer surface above the windows
+    /// is, unlocked: a window's, then the bottom and background layers'.
+    pub(crate) fn surface_under_windows(
+        &self,
+        pos: Point<f64, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        use crate::handlers::layer_shell::Stand;
+        // Where its surface's origin is, its geometry's corner less its
+        // client-side shadow.
+        self.space
+            .element_under(pos)
+            .and_then(|(window, origin)| {
+                window
+                    .surface_under(pos - origin.to_f64(), WindowSurfaceType::ALL)
+                    .map(|(s, p)| (s, (p + origin).to_f64()))
             })
-            .or_else(|| layer(Stand::Below))
+            .or_else(|| {
+                self.layer_surface_under(pos, Stand::Below)
+                    .map(|(s, p, _)| (s, p))
+            })
     }
 
     /// The window under `pos`, if no layer surface above the windows is.
@@ -526,16 +544,113 @@ pub struct ClientState {
     /// whatever holds the keyboard is (data control, #957): KDE Connect's
     /// daemon, by its program ([`crate::data_control`]).
     pub data_control: Option<String>,
+    /// Its process, as its socket said when it connected.
+    pub pid: Option<i32>,
+    /// Its connection, a copy of the compositor's end, looked at once it
+    /// ends to say why (#965); closed then.
+    pub peer: Mutex<Option<OwnedFd>>,
+    /// Its windows mapped, and their applications, to say what went when
+    /// it ends.
+    pub windows: Mutex<Vec<(WindowId, String)>>,
+}
+
+impl ClientState {
+    /// A client connected on `stream`: its process, and a copy of the
+    /// compositor's end to look at once it ends.
+    pub fn of(stream: &UnixStream) -> Self {
+        let pid = rustix::net::sockopt::socket_peercred(stream)
+            .ok()
+            .map(|cred| cred.pid.as_raw_nonzero().get());
+        let peer = stream.try_clone().ok().map(OwnedFd::from);
+        Self {
+            pid,
+            peer: Mutex::new(peer),
+            ..Self::default()
+        }
+    }
+
+    /// Its window `id` of application `app` is mapped.
+    pub fn mapped(&self, id: WindowId, app: String) {
+        self.windows
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((id, app));
+    }
+
+    /// Its window `id` went.
+    pub fn unmapped(&self, id: WindowId) {
+        self.windows
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(w, _)| *w != id);
+    }
+}
+
+/// Why a client's connection ended, as its end shows (#965).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ended {
+    /// The client closed its end: its process ended, or it closed the
+    /// connection itself.
+    ByClient,
+    /// Its end is open and full: it stopped reading, and its events
+    /// filled the room the compositor keeps for it.
+    Full,
+    /// Its end is open and has room: the compositor ended it (a former
+    /// shell's, a client it no longer serves).
+    ByCompositor,
+}
+
+impl Ended {
+    /// Looks at the compositor's end, `peer`, without waiting.
+    fn of(peer: &OwnedFd) -> Option<Self> {
+        use rustix::event::{PollFd, PollFlags, Timespec, poll};
+        let mut fds = [PollFd::new(peer, PollFlags::OUT | PollFlags::RDHUP)];
+        let now = Timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        poll(&mut fds, Some(&now)).ok()?;
+        let got = fds[0].revents();
+        Some(
+            if got.intersects(PollFlags::HUP | PollFlags::RDHUP | PollFlags::ERR) {
+                Self::ByClient
+            } else if got.contains(PollFlags::OUT) {
+                Self::ByCompositor
+            } else {
+                Self::Full
+            },
+        )
+    }
 }
 
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
     /// A protocol error the compositor raised is the only trace of why it
-    /// cut a client off (#954): the client sees a reset connection.
+    /// cut a client off (#954): the client sees a reset connection. Any
+    /// other end is said too, by what its end shows (#965): a client that
+    /// stopped reading until its events filled their room, as a warning;
+    /// one that closed its connection with windows open, or that the
+    /// compositor ended, plainly.
+    ///
+    /// The backend calls this with its own lock held: nothing here may
+    /// call into the display.
     fn disconnected(&self, client_id: ClientId, reason: DisconnectReason) {
+        // Closed now: the client sees its connection end once the backend
+        // drops its own end too.
+        let peer = self
+            .peer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        let windows =
+            std::mem::take(&mut *self.windows.lock().unwrap_or_else(PoisonError::into_inner));
+        let apps: Vec<&str> = windows.iter().map(|(_, app)| app.as_str()).collect();
+        let pid = self.pid.unwrap_or_default();
         if let DisconnectReason::ProtocolError(error) = reason {
             tracing::warn!(
                 client = ?client_id,
+                pid,
+                ?apps,
                 shell = self.shell,
                 interface = %error.object_interface,
                 object = error.object_id,
@@ -543,6 +658,46 @@ impl ClientData for ClientState {
                 message = %error.message,
                 "a client cut off by a protocol error"
             );
+            return;
+        }
+        match peer.as_ref().and_then(Ended::of) {
+            Some(Ended::Full) => tracing::warn!(
+                client = ?client_id,
+                pid,
+                ?apps,
+                shell = self.shell,
+                room_kib = crate::CLIENT_ROOM / 1024,
+                "a client cut off: it stopped reading, and its events filled their room"
+            ),
+            Some(Ended::ByCompositor) => tracing::info!(
+                client = ?client_id,
+                pid,
+                ?apps,
+                shell = self.shell,
+                "a client's connection closed by the compositor"
+            ),
+            // Every application that quits: said only for one whose
+            // windows were still open, which may not have been meant.
+            Some(Ended::ByClient) if windows.is_empty() => tracing::debug!(
+                client = ?client_id,
+                pid,
+                shell = self.shell,
+                "a client closed its connection"
+            ),
+            Some(Ended::ByClient) => tracing::info!(
+                client = ?client_id,
+                pid,
+                ?apps,
+                shell = self.shell,
+                "a client closed its connection itself (its program ended), its windows still open"
+            ),
+            None => tracing::debug!(
+                client = ?client_id,
+                pid,
+                ?apps,
+                shell = self.shell,
+                "a client's connection ended"
+            ),
         }
     }
 }

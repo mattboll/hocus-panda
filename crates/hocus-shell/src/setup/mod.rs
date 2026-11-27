@@ -800,24 +800,25 @@ fn calendars_read(n: u64, read: hocus_day::source::Result<Vec<Calendar>>) {
     }
 }
 
-/// `choice` written into the configuration file, `token` kept under the
-/// board's account, then the day's workers started again.
+/// `token` kept under the board's account, `choice` written into the
+/// configuration file, then the day's workers started again.
 fn finish(choice: &Choice, token: Option<Token>) {
     let Some(file) = crate::day::config_file() else {
         tracing::warn!("no configuration file: the day's sources are not kept");
         return;
     };
-    if let Err(why) = edit::write(&file, choice) {
-        tracing::warn!("the day's sources are not written: {why}");
-        return;
-    }
-    if let Some(token) = token {
-        let config = hocus_day::config::read(&file);
-        let account = config
-            .as_ref()
-            .ok()
-            .and_then(|c| c.tasks_account(file.parent()))
-            .map(|(account, _)| account.id);
+    // The token is kept before the file changes: the compositor, which
+    // follows the file, has the accounts started again as soon as it does,
+    // and a board started without its token says "sign in again" until the
+    // next reading (#933).
+    let keep = |written: &str| {
+        let Some(token) = token else {
+            return;
+        };
+        let account = hocus_day::config::from_toml(written).ok().and_then(|c| {
+            c.tasks_account(file.parent())
+                .map(|(account, _)| account.id)
+        });
         match account {
             Some(account) => match crate::day::secrets().keep(&account, &token) {
                 Ok(kept) => tracing::info!(%account, ?kept, "the board's token kept"),
@@ -825,6 +826,10 @@ fn finish(choice: &Choice, token: Option<Token>) {
             },
             None => tracing::warn!("the board's account is not in the configuration"),
         }
+    };
+    if let Err(why) = edit::write(&file, choice, keep) {
+        tracing::warn!("the day's sources are not written: {why}");
+        return;
     }
     tracing::info!(file = %file.display(), "the day's sources written");
     crate::day::reconfigure();

@@ -43,6 +43,7 @@ use hocus_link::{
     DeskWindow, Desktops, EDGE, Form, Look, POPOVER_NAMESPACE, Recent, Titles, WINDOWS_NAMESPACE,
 };
 use iced::window;
+use iced_exwlshell::reexport::Anchor;
 
 use crate::{
     clock::time::Lang,
@@ -202,8 +203,14 @@ pub fn rows_height(rows: &[Row]) -> f32 {
 
 // --- What shows, and where -------------------------------------------------------
 
-/// A surface's size and its layer-shell margins, as last asked for.
-type Asked = ((u32, u32), (i32, i32, i32, i32));
+/// A surface's size, its layer-shell margins and its top under the bar's,
+/// as last asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Asked {
+    size: (u32, u32),
+    margin: (i32, i32, i32, i32),
+    top: i32,
+}
 
 /// The windows' surface on a bar.
 #[derive(Debug, Clone, Default)]
@@ -220,6 +227,9 @@ struct Place {
     /// The group's top and the item's, under the bar's top.
     full_top: f32,
     mini_top: f32,
+    /// The bar's height, once known: the surface is placed from its
+    /// bottom.
+    bar_height: Option<f32>,
     asked: Option<Asked>,
     /// Whether it takes the pointer, as last asked: only while it shows.
     input: Option<bool>,
@@ -266,12 +276,10 @@ pub fn shown(bar: &str) -> Shown {
                 count: p.lines.len(),
                 full_top: p.full_top,
                 mini_top: p.mini_top,
-                surface_top: p
+                surface_top: p.asked.map_or(p.full_top, |a| a.top as f32),
+                surface_bottom: p
                     .asked
-                    .map_or(p.full_top, |(_, margin)| (margin.0 - EDGE) as f32),
-                surface_bottom: p.asked.map_or(p.full_top, |((_, height), margin)| {
-                    (margin.0 - EDGE) as f32 + height as f32
-                }),
+                    .map_or(p.full_top, |a| a.top as f32 + a.size.1 as f32),
             })
             .unwrap_or_default()
     })
@@ -331,6 +339,8 @@ struct Room {
     mini_bottom: Option<f32>,
     /// The mini form's room over its dots.
     mini_room: f32,
+    /// The bar's height, once its surface has had its size.
+    height: Option<f32>,
 }
 
 /// Every bar's rows for its windows and its room now: its surface comes,
@@ -363,6 +373,7 @@ pub fn fit_all() -> bool {
                 full_bottom,
                 mini_bottom,
                 mini_room,
+                height,
             }
         })
         .collect();
@@ -404,6 +415,7 @@ pub fn fit_all() -> bool {
                 listed.push(r.bar.clone());
             }
             place.lines = r.lines;
+            place.bar_height = r.height.or(place.bar_height);
             // Until the desktops are placed, it stays where it is: a top
             // from nothing would be off the screen (#617).
             if let Some(bottom) = r.full_bottom {
@@ -471,10 +483,28 @@ fn placement(
     }
 }
 
-/// The layer-shell margins of a surface whose top is `top` under the
-/// bar's.
-fn margin(top: f32) -> (i32, i32, i32, i32) {
-    (EDGE + top.round().max(0.0) as i32, EDGE + 1, 0, 0)
+/// The layer-shell margins of a surface `height` tall whose top is `top`
+/// under the top of a bar `bar` tall: from the bar's bottom, as the group
+/// grows and shrinks from its top over the desktops. A line added or gone
+/// then changes the surface's size alone, in one commit, and the
+/// compositor keeps the old buffer against the same bottom until the new
+/// one comes. From the top, the new top and the new size came in commits of
+/// their own (iced_exwlshell commits each), the old buffer shown at the new
+/// top between them (#964). At the bar's bottom while its height is not
+/// known.
+fn margin(bar: Option<f32>, top: i32, height: u32) -> (i32, i32, i32, i32) {
+    let under = bar.map_or(0, |bar| (bar.round() as i32 - top - height as i32).max(0));
+    (0, EDGE + 1, EDGE + under, 0)
+}
+
+/// What a surface `size` large whose top is `top` under the bar's asks for.
+fn ask(bar: Option<f32>, top: f32, size: (u32, u32)) -> Asked {
+    let top = top.round().max(0.0) as i32;
+    Asked {
+        size,
+        margin: margin(bar, top, size.1),
+        top,
+    }
 }
 
 /// The surface's height when it shows nothing: the ring's room, drawing
@@ -528,15 +558,16 @@ impl Place {
                 (width_of(self.form, self.switching), IDLE),
             )
         });
-        let asked = (size, margin(top));
+        let asked = ask(self.bar_height, top, size);
         let mut effects = Vec::new();
         if self.asked != Some(asked) {
+            let moved = self.asked.map(|a| a.margin) != Some(asked.margin);
             self.asked = Some(asked);
             *redraw = true;
             effects.push(Effect::Resize {
                 id,
-                size: asked.0,
-                margin: Some(asked.1),
+                size: asked.size,
+                margin: moved.then_some(asked.margin),
             });
         }
         if self.input != Some(shows) {
@@ -554,27 +585,33 @@ impl Place {
 /// height) and it has windows to show; to open after the bar's own.
 pub fn bar_opened(bar: &str, form: Form) -> Vec<Effect> {
     let id = window::Id::unique();
-    // Under the clock, inside the smallest screen: placed over the
-    // desktops once the bar knows its height (a place off a short screen
-    // keeps the shell from going on).
+    // At the bar's bottom, inside the smallest screen, taking no pointer
+    // over the footer: placed over the desktops once the bar knows its
+    // height (a place off a short screen keeps the shell from going on).
     let top = column::start(form) - draw::ROOM;
     let size = (width_of(Some(form), false), IDLE);
-    state(|s| {
+    let asked = state(|s| {
         let place = s.places.entry(bar.to_owned()).or_default();
         place.form = Some(form);
         place.id = Some(id);
         place.full_top = top + draw::ROOM;
         place.mini_top = top + draw::ROOM;
-        place.asked = Some((size, margin(top)));
+        let asked = ask(place.bar_height, top, size);
+        place.asked = Some(asked);
         place.input = None;
+        asked
     });
-    vec![Effect::Layer {
-        id,
-        bar: bar.to_owned(),
-        namespace: WINDOWS_NAMESPACE,
-        size,
-        margin: margin(top),
-    }]
+    vec![
+        Effect::Layer {
+            id,
+            bar: bar.to_owned(),
+            namespace: WINDOWS_NAMESPACE,
+            size,
+            anchor: Anchor::Right | Anchor::Bottom,
+            margin: asked.margin,
+        },
+        Effect::Input { id, takes: false },
+    ]
 }
 
 /// Bar `bar` in `form`, switching or not: its rows follow as the column

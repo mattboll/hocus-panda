@@ -208,6 +208,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
             bar,
             namespace,
             size,
+            anchor,
             margin,
         } => {
             crate::side::opened(id);
@@ -216,7 +217,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 NewLayerShellSettings {
                     size: crate::layer::size(size),
                     layer: Layer::Top,
-                    anchor: crate::side::anchor(Anchor::Right | Anchor::Top),
+                    anchor: crate::side::anchor(anchor),
                     exclusive_zone: Some(0),
                     margin: Some(crate::layer::margin(crate::side::margin(margin))),
                     keyboard_interactivity: KeyboardInteractivity::None,
@@ -313,7 +314,8 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
             output,
             size,
             margin,
-        } => vec![crate::layer::open(
+            fit,
+        } => vec![crate::layer::open_fitted(
             id,
             NewLayerShellSettings {
                 size: crate::layer::size(size),
@@ -333,6 +335,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 events_transparent: false,
                 namespace: Some(hocus_link::EMOJI_NAMESPACE.to_owned()),
             },
+            fit,
         )],
         Effect::Project {
             id,
@@ -364,7 +367,8 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
             output,
             size,
             margin,
-        } => vec![crate::layer::open(
+            fit,
+        } => vec![crate::layer::open_fitted(
             id,
             NewLayerShellSettings {
                 size: crate::layer::size(size),
@@ -384,6 +388,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 events_transparent: false,
                 namespace: Some(hocus_link::ACTIONS_NAMESPACE.to_owned()),
             },
+            fit,
         )],
         Effect::Tell(message) => {
             tell(message);
@@ -462,7 +467,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 namespace: Some(hocus_link::CAPTURE_EDITOR_NAMESPACE.to_owned()),
             },
         )],
-        Effect::LockSurface { id, output } => vec![crate::layer::open(
+        Effect::LockSurface { id, output, fit } => vec![crate::layer::open_fitted(
             id,
             NewLayerShellSettings {
                 size: crate::layer::size((0, 0)),
@@ -480,6 +485,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 events_transparent: false,
                 namespace: Some(hocus_link::LOCK_NAMESPACE.to_owned()),
             },
+            fit,
         )],
         Effect::CurtainSurface { id, output, top } => vec![crate::layer::open(
             id,
@@ -509,7 +515,8 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
             output,
             size,
             top,
-        } => vec![crate::layer::open(
+            fit,
+        } => vec![crate::layer::open_fitted(
             id,
             NewLayerShellSettings {
                 size: crate::layer::size(size),
@@ -528,6 +535,7 @@ pub(super) fn carry_out(effect: Effect) -> Vec<crate::Message> {
                 events_transparent: false,
                 namespace: Some(hocus_link::AUTH_NAMESPACE.to_owned()),
             },
+            fit,
         )],
         Effect::ShareChooser { id, output, size } => vec![crate::layer::open(
             id,

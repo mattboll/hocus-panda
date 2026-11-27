@@ -466,6 +466,9 @@ enum Message {
     Tray,
     /// A bar opened: its items to their places in its form.
     Fit(window::Id),
+    /// A surface fitted to its screen learnt its size (#942): iced takes
+    /// its new scale after this update.
+    Fitted,
     Resized(window::Id, Size),
     /// A screen moved on in giving its name ([`outputs`]).
     Screens,
@@ -611,7 +614,7 @@ impl Shell {
             Message::Screens => self.screens_named(),
             // Its update is the wake: iced_exwlshell redraws every surface
             // after one.
-            Message::Keys => Task::none(),
+            Message::Keys | Message::Fitted => Task::none(),
             Message::Music => {
                 music::changed();
                 Task::none()
@@ -1682,7 +1685,8 @@ fn is_bar(id: window::Id) -> bool {
 /// The bars' sizes, as they open and change: their height places their
 /// items, for the popovers, which take it at once; a change of size is a
 /// message too (the opaque backdrops follow the bar's height), as a bar
-/// opening is not: it would draw every surface again.
+/// opening is not: it would draw every surface again. The other surfaces'
+/// sizes, for those fitted to their screen (`layer::sized`).
 fn bar_sizes() -> Subscription<Message> {
     iced::event::listen_with(|event, _, id| match event {
         // iced says a surface's size in the compositor's pixels: the bar's
@@ -1702,6 +1706,11 @@ fn bar_sizes() -> Subscription<Message> {
             let size = size * (1.0 / layer::zoom(id));
             popover::with(|c| c.height(id, size.height));
             Some(Message::Resized(id, size))
+        }
+        // Another surface: one as large as its screen that must fit it
+        // learns the screen's size (#942, the lock).
+        iced::Event::Window(window::Event::Opened { size, .. } | window::Event::Resized(size)) => {
+            layer::sized(id, size).then_some(Message::Fitted)
         }
         // Closed by the compositor too (its screen gone): its anchor
         // forgotten.

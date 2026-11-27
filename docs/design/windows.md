@@ -1258,7 +1258,9 @@ here unless said.
   2 px in the accent, 4 px out. Its label 14 px under it: the number
   (13.5 px, 600, `text.dim`), "3 · Courrier" with a name; a project's
   monogram (22 × 20), "2 · hocus-site" (700) and its folder (Martian
-  Mono 11 px, `text.faint`). An empty desktop shows the overview's
+  Mono 11 px, `text.faint`); the label at the text size
+  (`[appearance] text-scale`, 80 to 150 %, settings.md 6.2, #942), the room under a desktop holding it up to 150 %. An
+  empty desktop shows the overview's
   resting panda (75 % of its height, 96 px at most), breathing as the
   view opens. A window hosting agents carries the overview's badge,
   smaller (a 26 px panda, 11.5 px words), a waiting panda bobbing.
@@ -1558,7 +1560,10 @@ page, "Rouvrir les applications de la dernière session", settings.md).
   area, its desktop, where it floats (where it goes back to when it is
   snapped, maximised or fullscreen), its state, kept above, on all
   desktops, its opacity when it is not opaque (§3, #735); the windows of
-  one application in the order they opened. A window waiting for a screen gone is saved where it was on that screen.
+  one application in the order they opened. A window waiting for a
+  screen gone is saved where it was on that screen, in the state it had
+  there, and where it waits too (#952: the place, size and state the
+  user gave it on the screen it was carried to).
   Never saved: dialogs, the Settings, the shell's own surfaces, windows
   whose application has no desktop entry.
 - **When**: 3 s after windows changed (opened, closed, moved, resized,
@@ -1574,13 +1579,17 @@ page, "Rouvrir les applications de la dernière session", settings.md).
   its `Path`, its terminal); not one the autostart starts (the same entry
   id or the same program), whose windows still go back. Each window that
   maps takes the first saved place of its application (by app id) still
-  waiting, before its first frame where it can (its size in its first
+  waiting; a window of a process started for some places (a terminal
+  started in its folder, #952) takes the first of those, whichever shows
+  first; before its first frame where it can (its size in its first
   configure): its screen, desktop, place, state, kept above, on all
   desktops; it opens there without pulsing. Its screen not there: it goes
-  to the screen it opened on, on the same-numbered desktop, at the same
-  share of the work area, in its state, and waits for its screen as a
-  window of a screen unplugged does (§12): it goes back when that screen
-  comes. 30 s after the applications started, the places not taken are
+  where it waited for it as the session ended, when it was waiting and
+  that screen is here, as it was there (#952); else to the screen it
+  opened on, on the same-numbered desktop, at the same share of the work
+  area, in its state. Either way it waits for its screen as a window of
+  a screen unplugged does (§12): it goes back when that screen comes, in
+  the place and state it had there. 30 s after the applications started, the places not taken are
   dropped.
 - **An application that does not come back** (no longer installed, its
   program would not run, it ended in error before a window, or no window

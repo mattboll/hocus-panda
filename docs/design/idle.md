@@ -207,6 +207,9 @@ the battery's 3 are over, the dim comes at once).
 
 ### The curtain (variant A)
 
+Its sizes are at the text size of 100 %: at another (`[appearance] text-scale`, 80 to 150 %, settings.md 6.2, #942) the pill,
+its corners, shadow and rise are that many times larger.
+
 - **The dim**, drawn by the compositor over everything but the cursor
   (windows, the bar, its popovers, every screen): `rgba(4,6,10,0)` to
   `rgba(4,6,10,0.74)` along `p^1.15`. It draws a frame a tenth of a second

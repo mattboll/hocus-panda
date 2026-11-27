@@ -487,6 +487,13 @@ pub enum Shows {
         app_id: &'static str,
         size: (u32, u32),
     },
+    /// An xdg toplevel of this size that takes the pointer and the
+    /// keyboard and says what they get ([`Event::Pointer`],
+    /// [`Event::Key`]), as any application does.
+    Listening {
+        app_id: &'static str,
+        size: (u32, u32),
+    },
     /// An xdg toplevel of this size that moves itself as an application
     /// dragged by its own header does: pressed with the left button, at
     /// the first motion after, it asks the compositor to move it
@@ -551,6 +558,10 @@ pub enum Command {
     /// Ends the client: its thread returns and its connection closes, as
     /// an application's process ending.
     Quit,
+    /// Stops reading its connection while the flag holds, as an
+    /// application busy for a moment (a garbage collection, a slow
+    /// write): [`Event::Stalled`] once it stopped.
+    Stall(std::sync::Arc<std::sync::atomic::AtomicBool>),
     /// Destroys its layer surface.
     CloseLayer,
     /// Titles its window, without drawing (a terminal's prompt does so).
@@ -632,6 +643,8 @@ pub enum Event {
     PopupDone,
     /// The compositor asked its window to close; it stays.
     CloseRequested,
+    /// It stopped reading its connection ([`Command::Stall`]).
+    Stalled,
     /// The compositor has its clipboard.
     Copied,
     /// The keyboard's modifiers came, with this layout (XKB's group).
@@ -874,6 +887,17 @@ fn run_client(
             client.window = Some(window);
             client.pointing = true;
         }
+        Some(Shows::Listening { app_id, size }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.pointing = true;
+            client.typing = true;
+        }
         Some(Shows::Moving { app_id, size }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
             let surface = client.compositor.create_surface(&qh);
@@ -1097,6 +1121,12 @@ fn run_client(
                 (Command::Popup { anchor, size }, _) => client.open_tip(&qh, anchor, size),
                 (Command::Close, _) => client.window = None,
                 (Command::Quit, _) => return Ok(()),
+                (Command::Stall(stalled), _) => {
+                    events.send(Event::Stalled)?;
+                    while stalled.load(std::sync::atomic::Ordering::SeqCst) {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                }
                 (Command::CloseLayer, _) => client.layer = None,
                 (Command::Title(title), Some(window)) => window.set_title(title),
                 (Command::Title(_), None) => {}

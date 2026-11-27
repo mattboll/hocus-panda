@@ -712,6 +712,67 @@ fn a_screen_plugged_while_locked_keeps_the_shell() -> anyhow::Result<()> {
     unlock(&mut bed.hp)
 }
 
+/// The shell busy for a moment, reading nothing, while the pointer moves
+/// over the lock (the user waking the machine) and a screen is plugged in,
+/// the bar moving to it (#954: the shell was cut off 40 ms after the
+/// screen came, no protocol error in sight). What the compositor sends it
+/// meanwhile, more than its socket holds, waits in its room (#965), and
+/// it is not cut off; once it reads again, its lock covers the new screen.
+#[test]
+fn a_screen_plugged_while_the_shell_is_busy_keeps_it() -> anyhow::Result<()> {
+    const SECOND: &str = "HEADLESS-2";
+    let Some(mut bed) = Bed::start_configured(&["2560x1600@1.25"], None, &["us"], |config| {
+        config.panel.output = SECOND.into();
+    })?
+    else {
+        return Ok(());
+    };
+    let mut clients = Vec::new();
+    for app in ["test.one", "test.two", "test.three"] {
+        let shows = Shows::Window {
+            app_id: app,
+            size: (600, 400),
+            popup: false,
+        };
+        clients.push(open_showing(&mut bed.hp, app, shows)?.1);
+    }
+    bed.lock()?;
+    common::at_rest(&mut bed.hp)?;
+    let shell = bed.hp.shell_pid();
+    bed.hp.pause_shell(true)?;
+    // A few seconds of the pointer over the lock, the loop turning between
+    // moves as it does: each turn sends what it has.
+    for turn in 0..600_u32 {
+        for i in 0..10_u32 {
+            bed.hp
+                .pointer_move(f64::from(400 + (turn + i) % 300), f64::from(300 + i));
+        }
+        bed.hp.dispatch(Duration::from_millis(5))?;
+    }
+    bed.hp
+        .plug_screen(SECOND, OutputSpec::new(3440, 1440), None)?;
+    // A while for the compositor to send all it has to.
+    bed.hp
+        .dispatch_until(Duration::from_millis(500), |_| false)?;
+    let kept = bed.hp.shell_connected() && bed.hp.shell_pid() == shell;
+    bed.hp.pause_shell(false)?;
+    assert!(kept, "the shell was cut off while it did not read");
+    let covered = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.lock_drawn_on().len() == 2 && hp.lock_shown().is_some_and(|s| s.output == SECOND)
+    })?;
+    assert!(
+        covered,
+        "the lock never covered the new screen: {:?}, {:?}",
+        bed.hp.lock_drawn_on(),
+        bed.hp.lock_shown()
+    );
+    common::at_rest(&mut bed.hp)?;
+    assert!(bed.hp.shell_connected(), "the shell was cut off");
+    assert_eq!(bed.hp.shell_pid(), shell, "the shell started again");
+    drop(clients);
+    unlock(&mut bed.hp)
+}
+
 /// Unlocked: the shell is told, its lock surfaces go, the desktop shows
 /// as it was, the focused window has the keyboard, the bar's clock draws
 /// again.

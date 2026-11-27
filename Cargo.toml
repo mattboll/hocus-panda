@@ -91,6 +91,7 @@ tract-pulse = { version = "0.23.10", default-features = false }
 rustfft = "6.4.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tracing-appender = "0.2.5"
 udev = "0.9.3"
 unicode-normalization = "0.1.26"
 ureq = { version = "3.5.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
@@ -102,6 +103,7 @@ whisper-rs = "0.16.0"
 ash = { version = "0.38.0", default-features = false, features = ["loaded", "std"] }
 wayland-backend = { version = "0.3.17", features = ["client_system"] }
 wayland-client = "0.31.15"
+wayland-server = "0.31.14"
 wayland-protocols = { version = "0.32.13", features = ["client", "staging", "unstable"] }
 wayland-protocols-misc = { version = "0.3.12", features = ["client"] }
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }

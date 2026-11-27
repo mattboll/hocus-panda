@@ -140,8 +140,16 @@ fn main() -> ExitCode {
         Ok(panics) => filter.add_directive(panics),
         Err(_) => filter,
     };
+    // Written by a thread of its own: a session's stderr is a pipe to the
+    // journal, which may be slow to take it, and the loop never waits for
+    // it (#965). Past the lines it holds, a line is dropped rather than
+    // waited for. Kept until `main` ends, which writes what is left.
+    let (writer, _written) = tracing_appender::non_blocking::NonBlockingBuilder::default()
+        .lossy(true)
+        .thread_name("log")
+        .finish(std::io::stderr());
     tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
+        .with_writer(writer)
         // A session's stderr goes to the journal, which shows no colours.
         .with_ansi(std::io::stderr().is_terminal())
         .with_env_filter(filter)
@@ -182,6 +190,12 @@ fn main() -> ExitCode {
     config.videos = hocus_compositor::record::save::videos_dir();
     config.meeting_places = hocus_meetings::Places::from_env();
     config.documents = hocus_meetings::documents_dir();
+    // The session's programs write into the journal, a stream each (#965);
+    // nested or headless, where the compositor writes.
+    if matches!(backend, BackendArg::Tty) {
+        config.program_output =
+            hocus_compositor::ProgramOutput::Journal(hocus_compositor::JOURNAL_STREAMS.into());
+    }
     // The shutter is heard in a session, not from a headless compositor
     // next to one (6.17).
     if !matches!(backend, BackendArg::Headless) {
@@ -219,6 +233,11 @@ fn main() -> ExitCode {
             .and_then(|exe| hocus_compositor::away::charge::Helper::packaged(&exe, supplies)),
         None => None,
     };
+    // GTK applications' text size (#942): GNOME's setting, in the
+    // session's own dconf, only when this is the session.
+    if matches!(backend, BackendArg::Tty) {
+        config.gnome_settings = Some(PathBuf::from("gsettings"));
+    }
     // The Hocuspanda microphone (#619, lot 5): the same.
     if args.voice || matches!(backend, BackendArg::Tty) {
         config.voice_program = Some(beside("hocus-voice"));

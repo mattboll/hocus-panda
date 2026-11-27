@@ -408,6 +408,8 @@ impl State {
             let _runs = runs;
             let started = Instant::now();
             let mut command = env.command(&program);
+            // A stream of its own, under the compositor's name (#965).
+            env.output.desktop().on(&mut command);
             hand_socket(&mut command, &theirs);
             command.env(hocus_link::SOCKET_ENV, &socket);
             match &bus {
@@ -457,15 +459,13 @@ impl State {
     /// client known to be the shell, the other end to hand it.
     fn shell_connection(&mut self) -> anyhow::Result<UnixStream> {
         let (ours, theirs) = UnixStream::pair().context("a socket pair")?;
+        let state = crate::state::ClientState {
+            shell: true,
+            ..crate::state::ClientState::of(&ours)
+        };
         let client = self
             .display_handle
-            .insert_client(
-                ours,
-                std::sync::Arc::new(crate::state::ClientState {
-                    shell: true,
-                    ..Default::default()
-                }),
-            )
+            .insert_client(ours, std::sync::Arc::new(state))
             .context("the shell's client")?;
         // One shell at a time: a former one's connection is no longer it.
         if let Some(old) = self.shell.client.replace(client.id()) {

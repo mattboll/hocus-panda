@@ -452,6 +452,7 @@ mod tests {
             window: Some(1),
             title: "kitty".into(),
             area: (8, 1800),
+            height: 1200,
             on: vec!["above".into()],
             inert: vec![("move-to-screen-right".into(), Inert::OneScreen)],
             shortcuts: vec![("snap-right".into(), vec!["Super+Right".into()])],

@@ -5,7 +5,9 @@
 //! together, on one clock, so that a 50 Hz screen draws at most 30 frames
 //! a second for them, not one for each; what a frame of a 3440 × 1440
 //! screen with the bar's glass and the effects costs the loop; and what a
-//! laptop panel's scene gives the damage tracker (#948).
+//! laptop panel's scene gives the damage tracker, and that a window against
+//! the edge two screens share builds no scene on the one it does not
+//! cover (#948).
 
 use crate::common;
 
@@ -381,6 +383,47 @@ fn a_scene_gives_the_damage_tracker_a_few_rectangles_a_window() -> anyhow::Resul
     // Five a window at most (its opaque region less its corners'
     // squares), and the wallpaper's.
     assert!(opaque <= 3 * 5 + 1, "{opaque} opaque rectangles a scene");
+    Ok(())
+}
+
+/// A window against the edge two screens share (#948: a terminal snapped
+/// to the left of the screen beside a laptop's panel), drawing on and on:
+/// the screen it touches but does not cover builds no scene for it. The
+/// panel built one, found empty, for each of the window's frames, at its
+/// own 165 Hz: two thirds of the compositor's scenes.
+#[test]
+fn a_window_against_the_other_screen_builds_no_scene_there() -> anyhow::Result<()> {
+    let mut hp = common::two_screens()?;
+    let (_, window) = common::open_with(&mut hp, "test.edge", (800, 600), false)?;
+    let id = hp
+        .windows()
+        .into_iter()
+        .find(|w| w.app_id.as_deref() == Some("test.edge"))
+        .map(|w| w.id)
+        .ok_or_else(|| anyhow::anyhow!("no window"))?;
+    // Against the second screen's left edge, then the first's right one.
+    for (rect, drawing, other) in [
+        (Rect::new(1920, 200, 800, 600), 1, 0),
+        (Rect::new(1920 - 800, 200, 800, 600), 0, 1),
+    ] {
+        hp.place_window(id, rect);
+        common::wait_for_rect(&mut hp, "test.edge", rect)?;
+        common::at_rest(&mut hp)?;
+        let (mine, theirs) = (hp.scenes_on(drawing), hp.scenes_on(other));
+        for i in 0..30u32 {
+            let colour = 0xff00_0000 | (i * 8) << 16 | (255 - i * 8);
+            let before = hp.scenes_on(drawing);
+            window.commands.send(common::Command::Header(colour))?;
+            let drawn = hp.dispatch_until(WAIT, |hp| hp.scenes_on(drawing) > before)?;
+            anyhow::ensure!(drawn, "its frame {i} was never drawn");
+        }
+        let (mine, theirs) = (hp.scenes_on(drawing) - mine, hp.scenes_on(other) - theirs);
+        assert!(mine >= 10, "its screen drew it: {mine} scenes");
+        assert!(
+            theirs <= 2,
+            "at {rect:?}, the screen it touches built {theirs} scenes (its own: {mine})"
+        );
+    }
     Ok(())
 }
 

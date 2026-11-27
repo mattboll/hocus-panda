@@ -119,6 +119,14 @@ The display manager comes back. Why is in the journal:
 journalctl --user -t hocuspanda -b      # this boot's sessions; -b -1 for the previous boot
 ```
 
+That is the compositor, the shell and the desktop's other programs. Each
+application the desktop starts writes under its desktop entry's id, or
+its program's name, which the compositor's `started` line gives:
+
+```sh
+journalctl --user -t org.mozilla.firefox -b
+```
+
 ## Without a package
 
 [`install.sh`](install.sh) installs the same files from a release build,

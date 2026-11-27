@@ -8,8 +8,11 @@
 //! the programs started afterwards (`LANGUAGE`). The text size (#928) to
 //! the shell, which draws its bar, popovers, launcher and notifications
 //! at it, to the bar's room and glass, and to the applications (the
-//! portal's `text-scaling-factor`).
+//! portal's `text-scaling-factor`); every surface of the shell's (#942),
+//! the compositor's own words (the overview's labels, the capture's size
+//! and countdown), and GNOME's setting for GTK applications ([`gnome`]).
 
+pub mod gnome;
 pub mod portal;
 
 use hocus_link::ToShell;
@@ -64,6 +67,7 @@ impl State {
             // The bar's room is its width at the text size: the windows
             // the desktop placed take the new work area.
             self.rearrange();
+            self.gnome_text_scale();
         }
         if (now.cursor_theme.as_ref(), now.cursor_size)
             != (old.cursor_theme.as_ref(), old.cursor_size)

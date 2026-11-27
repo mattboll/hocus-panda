@@ -1162,7 +1162,9 @@ fn draw_back(f: &mut Frame, dialog: &Dialog, caps: bool, waiting: usize, w: Word
     );
     // The header.
     let (_, icon) = who(dialog);
-    let scale = dialog.at.as_ref().map_or(1.0, |a| a.scale as f32 / 120.0);
+    // Its pixels at the text size too.
+    let scale =
+        dialog.at.as_ref().map_or(1.0, |a| a.scale as f32 / 120.0) * crate::layer::text_factor();
     let px = crate::launcher::icons::pixels(ICON_PX, scale);
     match icon.and_then(|name| crate::launcher::icons::of(&name, px).flatten()) {
         Some(handle) => {

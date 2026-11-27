@@ -4,7 +4,8 @@ Status: approved 2026-11-02 (issue #397), variant A of the 5.7 mockup:
 at the caret. Built since 2026-11-03: see [as built](#as-built). Sizes
 are the mockup's logical pixels; the picker is drawn ×1.5 of them, the
 launcher's zoom (launcher.md, 5.1b), so that a 2560 × 1600 screen at
-scale 1 reads it well.
+scale 1 reads it well; and that many times larger again at another text
+size (`[appearance] text-scale`, 80 to 150 %, settings.md 6.2, #942).
 
 ## 1. Opening
 

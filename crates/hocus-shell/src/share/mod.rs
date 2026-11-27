@@ -370,7 +370,7 @@ impl Share {
                     crate::launcher::icons::want(
                         [icon.as_str()],
                         view::ICON_PX,
-                        shown.choose.scale as f32 / 120.0,
+                        shown.choose.scale as f32 / 120.0 * crate::layer::text_factor(),
                     );
                 }
                 tracing::debug!(
@@ -527,14 +527,21 @@ fn thumbs(chooser: &mut Chooser) -> Option<Effect> {
         .filter_map(|card| {
             let source = sources.get(card.index)?.clone();
             let r = card.thumb;
-            // Inside its 1 px rim.
+            // Inside its 1 px rim, in the compositor's pixels at the text
+            // size.
+            let [x, y, width, height] = crate::layer::told(iced::Rectangle {
+                x: r.x + 1.0,
+                y: r.y + 1.0,
+                width: (r.width - 2.0).max(1.0),
+                height: (r.height - 2.0).max(1.0),
+            });
             Some((
                 source,
                 Rect {
-                    x: (r.x + 1.0).round() as i32,
-                    y: (r.y + 1.0).round() as i32,
-                    width: (r.width - 2.0).round().max(1.0) as i32,
-                    height: (r.height - 2.0).round().max(1.0) as i32,
+                    x,
+                    y,
+                    width: width.max(1),
+                    height: height.max(1),
                 },
             ))
         })

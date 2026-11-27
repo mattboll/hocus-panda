@@ -174,13 +174,15 @@ pub enum Effect {
         rect: Rectangle,
     },
     /// A layer surface of the shell's beside `bar`, of `namespace` (the
-    /// peek, 4.5): `size`, its margins from the screen's top right (top,
-    /// right, bottom, left); it takes no keyboard.
+    /// peek, 4.5): `size`, anchored to `anchor`'s edges (said for a bar
+    /// on the right), its margins from them (top, right, bottom, left);
+    /// it takes no keyboard.
     Layer {
         id: window::Id,
         bar: String,
         namespace: &'static str,
         size: (u32, u32),
+        anchor: Anchor,
         margin: (i32, i32, i32, i32),
     },
     /// Surface `id` takes the pointer in `rects` only (its own pixels).
@@ -220,6 +222,8 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
         margin: (i32, i32, i32, i32),
+        /// What it needs of its screen to show whole (#942).
+        fit: crate::layer::Fit,
     },
     /// The emoji picker's surface on `output` (5.7): `size`, its margins
     /// from the screen's top left corner (top, right, bottom, left),
@@ -229,6 +233,8 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
         margin: (i32, i32, i32, i32),
+        /// What it needs of its screen to show whole (#942).
+        fit: crate::layer::Fit,
     },
     /// A project's form or card opens (docs/design/projects.md): a surface
     /// `size` large, of `namespace`, on `output`, its margins from the
@@ -273,6 +279,8 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
         top: i32,
+        /// What it needs of its screen to show whole (#942).
+        fit: crate::layer::Fit,
     },
     /// The capture's thumbnail on `output` (5.9), `size` large, its
     /// margins from the screen's bottom right corner (top, right, bottom,
@@ -297,6 +305,8 @@ pub enum Effect {
     LockSurface {
         id: window::Id,
         output: String,
+        /// What it needs of its screen to show whole (#942).
+        fit: crate::layer::Fit,
     },
     /// The curtain's pill on `output` (7.2): 300 × 64, centred across it,
     /// `top` from its top, over everything, taking neither the pointer nor

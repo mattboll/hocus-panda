@@ -52,6 +52,7 @@ use hocus_link::{
     CameraUser, EDGE, Form, IN_USE_NAMESPACE, RecordingShown, ShareShown, SharedThing, ToCompositor,
 };
 use iced::window;
+use iced_exwlshell::reexport::Anchor;
 
 use crate::{
     levels::icons::Icon,
@@ -672,6 +673,7 @@ impl Place {
                     bar: bar.to_owned(),
                     namespace: IN_USE_NAMESPACE,
                     size,
+                    anchor: Anchor::Right | Anchor::Top,
                     margin,
                 }]
             }

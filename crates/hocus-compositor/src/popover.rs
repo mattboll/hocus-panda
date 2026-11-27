@@ -124,7 +124,7 @@ pub struct Shown {
     /// A popover of the bar's, the emoji picker or the palette.
     pub kind: Kind,
     /// How many times its mockup's size the shell draws it: the text size
-    /// for a popover of the bar's (#928), else 1.
+    /// (#928, #942).
     pub zoom: f64,
 }
 
@@ -177,23 +177,28 @@ fn look(opened: Duration, closing: Option<Duration>, now: Duration, motion: bool
 }
 
 impl Shown {
-    /// Its shadow.
+    /// Its shadow, at the text size.
     pub fn shadow(&self) -> ShadowStyle {
         match self.kind {
-            Kind::Popover => SHADOW.zoomed(self.zoom),
+            Kind::Popover => SHADOW,
             Kind::Emoji => EMOJI_SHADOW,
             Kind::Actions => ACTIONS_SHADOW,
             Kind::Project => ShadowStyle {
-                radius: self.radius(),
+                radius: self.mockup_radius(),
                 ..PROJECT_SHADOW
             },
         }
+        .zoomed(self.zoom)
     }
 
-    /// Its corners' radius.
+    /// Its corners' radius, at the text size.
     pub fn radius(&self) -> f64 {
+        self.mockup_radius() * self.zoom
+    }
+
+    fn mockup_radius(&self) -> f64 {
         match self.kind {
-            Kind::Popover => hocus_link::RADIUS * self.zoom,
+            Kind::Popover => hocus_link::RADIUS,
             Kind::Emoji => EMOJI_RADIUS,
             Kind::Actions => ACTIONS_RADIUS,
             Kind::Project if self.layer.namespace() == hocus_link::PROJECT_CARD_NAMESPACE => {
@@ -206,14 +211,16 @@ impl Shown {
         }
     }
 
-    /// How far it comes down from as it opens (and goes back up to).
+    /// How far it comes down from as it opens (and goes back up to), at
+    /// the text size.
     pub fn reach(&self) -> f64 {
-        match self.kind {
+        let reach = match self.kind {
             Kind::Popover => 0.0,
             Kind::Emoji => EMOJI_RISE,
             Kind::Actions => hocus_link::ACTIONS_DROP,
             Kind::Project => hocus_link::PROJECT_RISE,
-        }
+        };
+        reach * self.zoom
     }
 
     fn moving(&self, now: Duration) -> bool {
@@ -230,8 +237,8 @@ impl Shown {
 }
 
 impl Popovers {
-    /// The text size changed (#928): the popovers of the bar's showing are
-    /// drawn `zoom` times their mockup's size from now on.
+    /// The text size changed (#928): the popovers showing are drawn `zoom`
+    /// times their mockup's size from now on.
     pub fn zoom(&mut self, zoom: f64) {
         for shown in &mut self.shown {
             if hocus_link::follow_text_scale(shown.layer.namespace()) {
@@ -264,7 +271,13 @@ impl Popovers {
                     },
                 }
             }
-            Kind::Actions => actions_look(shown.opened, shown.closing, now, motion),
+            Kind::Actions => {
+                let look = actions_look(shown.opened, shown.closing, now, motion);
+                Look {
+                    rise: look.rise * shown.zoom,
+                    ..look
+                }
+            }
         })
     }
 

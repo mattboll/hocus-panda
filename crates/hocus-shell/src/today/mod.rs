@@ -48,6 +48,7 @@ use std::{
 use hocus_day::{Day, model::Colour};
 use hocus_link::{EDGE, Form, TODAY_NAMESPACE};
 use iced::window;
+use iced_exwlshell::reexport::Anchor;
 use jiff::Zoned;
 
 use crate::{
@@ -458,6 +459,7 @@ impl Place {
                     bar: bar.to_owned(),
                     namespace: TODAY_NAMESPACE,
                     size: asked.0,
+                    anchor: Anchor::Right | Anchor::Top,
                     margin: asked.1,
                 }]
             }

@@ -102,6 +102,10 @@ There is no `arrange`: an agent composes moves. Lot B's tools are under
 
 ## What shows
 
+The tag, the toast and the card are drawn at the text size
+(`[appearance] text-scale`, 80 to 150 %, settings.md 6.2, #942), at the places the compositor says (a window's corner, its
+pointer, the screen's bottom).
+
 1. **Before an action** (scene 1): for `[agents] show-before-ms` (600 by
    default, 0 for none), a violet ring 2 px outside the window it will
    touch, and a tag at the window's top left, the agent's name over its
