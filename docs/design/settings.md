@@ -1189,11 +1189,30 @@ window is the preview.
   `org.gnome.desktop.interface` `text-scaling-factor` on the settings
   portal (1.3 for 130 %), which the desktop serves beside
   `org.freedesktop.appearance`.
-- **Choices made here (to confirm on the machine)**: the surfaces over a
-  dimmed screen or on a window (the lock, the authentication dialog, the
-  capture's and the sharing's surfaces, the actions palette, the emoji
-  picker, the projects' cards, the agents' tags and toasts) keep their
-  sizes; the cursor's preview is a drawn arrow, not the theme's image; a
+- **Every surface** (#942, decided 2026-11-23) follows it too, by the
+  same mechanism: every one of the shell's (`hocus_link::follow_text_scale`,
+  the `hocus-` namespaces), so also the lock and the curtain before it,
+  the authentication dialog, the capture's toolbar, thumbnail and
+  annotator, the sharing's chooser, the actions palette, the emoji
+  picker, the projects' form, card and confirmation, and the agents'
+  tags, toasts and cards. Those placed by what the compositor says of the
+  screen (a window's corner, a caret, the work area, the screen's height)
+  take it in their own pixels first (`layer::from_screen`), so that they
+  land where it says; what they tell it of a place on them is multiplied
+  back (`layer::told`: the sharing's thumbnails). The compositor draws
+  their corners, shadows and motion at it (`State::zoom_of`), and its own
+  words at it too: every desktop's labels (#944), the capture's size
+  over its area and its countdown.
+- **GTK applications** (#942): besides the portal, which Flatpak's read,
+  the session writes GNOME's `text-scaling-factor` in its own dconf,
+  through `gsettings` on a thread of its own (`appearance/gnome.rs`), as
+  it starts and each time the file changes the text size, so that
+  ordinary GTK applications follow; accepted: a GNOME session of the same
+  account takes it too. Only the session on a virtual terminal writes it
+  (`Config::gnome_settings`); nested and headless compositors never do,
+  and tests give a fake `gsettings` of their own.
+- **Choices made here (to confirm on the machine)**: the cursor's preview
+  is a drawn arrow, not the theme's image; a
   menu near the page's bottom opens over its button; the compositor's
   own rim around the focused window keeps the pandas' green.
 

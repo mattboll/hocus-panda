@@ -424,6 +424,15 @@ the notifications, so only on a bus of your own next to a live session;
 its tests (`crates/hocus-compositor/tests/idle.rs`) start a dbus-daemon of
 their own.
 
+The text size (`[appearance] text-scale`, docs/design/settings.md 6.2):
+besides the settings portal, the session on a virtual terminal writes
+GNOME's `org.gnome.desktop.interface text-scaling-factor` into the
+user's own dconf for GTK applications (`gsettings`,
+`Config::gnome_settings`); a nested or headless compositor never does, so
+it never touches the live session's dconf. Its tests
+(`tests/appearance.rs`) give a fake `gsettings` of their own; never run
+`gsettings set` or `dconf write` next to a live session.
+
 Removable drives (docs/design/bar.md "Removable drives", crate
 `hocus-removable`): the shell follows UDisks2 on the system bus, and
 mounts, unmounts and powers off what the user asks only: a nested shell

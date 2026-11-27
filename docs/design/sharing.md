@@ -3,8 +3,10 @@
 Status: approved 2026-11-03 (issue #443), variant A of the 5.11 mockup: a
 chooser window. Built since 2026-11-03: see [as built](#as-built). The
 chooser's sizes are logical pixels, the mockup's, drawn × 1.5
-(`hocus_link::LAUNCHER_ZOOM`) as the launcher's and the capture's are; the
-bar's sign and its popover keep the bar's own sizes. 5.12 (issue #445)
+(`hocus_link::LAUNCHER_ZOOM`) as the launcher's and the capture's are, and
+that many times larger again at another text size (`[appearance] text-scale`, 80 to 150 %, settings.md 6.2, #942) (fewer rows
+of thumbnails then, when the screen is too short); the bar's sign and its
+popover keep the bar's own sizes. 5.12 (issue #445)
 groups the sign with the microphone's and the camera's into one sign of
 what is in use: since then the share is its screen's tile, and its line
 ("Firefox", "Écran · partage la fenêtre « … » · depuis 3 min"), the

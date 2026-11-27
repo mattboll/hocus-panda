@@ -1258,7 +1258,9 @@ here unless said.
   2 px in the accent, 4 px out. Its label 14 px under it: the number
   (13.5 px, 600, `text.dim`), "3 · Courrier" with a name; a project's
   monogram (22 × 20), "2 · hocus-site" (700) and its folder (Martian
-  Mono 11 px, `text.faint`). An empty desktop shows the overview's
+  Mono 11 px, `text.faint`); the label at the text size
+  (`[appearance] text-scale`, 80 to 150 %, settings.md 6.2, #942), the room under a desktop holding it up to 150 %. An
+  empty desktop shows the overview's
   resting panda (75 % of its height, 96 px at most), breathing as the
   view opens. A window hosting agents carries the overview's badge,
   smaller (a 26 px panda, 11.5 px words), a waiting panda bobbing.

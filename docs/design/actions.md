@@ -7,7 +7,9 @@ turns the list into its targets; an action impossible now stays listed at
 45 % with its reason; names are searched in French and in English; no
 result offers the launcher's and the Settings' search; only actions that
 already exist. Built since 2026-11-07: see [as built](#as-built). Sizes
-are logical pixels.
+are logical pixels, at the text size of 100 %; at another
+(`[appearance] text-scale`, 80 to 150 %, settings.md 6.2, #942) the palette is drawn that many times larger, as far under the
+screen's top, still centred in the work area.
 
 ## 1. What it is
 

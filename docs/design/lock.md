@@ -176,7 +176,9 @@ connects; its lock fades in from black.
 
 ## What the shell draws (variant A)
 
-Sizes in logical pixels (`crates/hocus-shell/src/lock/draw.rs`):
+Sizes in logical pixels (`crates/hocus-shell/src/lock/draw.rs`), at the
+text size of 100 %: at another (`[appearance] text-scale`, 80 to 150 %, settings.md 6.2, #942) everything on it is that many
+times larger, its background still the screen's whole.
 
 - **The background**: each screen's wallpaper (6.3, `[wallpaper] lock`:
   `"dimmed"` by default, `"blurred"`, or `"picture"`, `lock-picture`),
