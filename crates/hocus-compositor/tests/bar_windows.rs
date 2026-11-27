@@ -416,9 +416,31 @@ impl Bed {
             .ok_or_else(|| anyhow::anyhow!("no windows drawn"))
     }
 
-    /// The desktops' tiles' (or dots') top on the screen.
-    fn tiles_top(&mut self) -> anyhow::Result<i32> {
-        Ok(common::drawn(&mut self.hp, DESKTOPS_NAMESPACE)?[0].1.y + ROOM)
+    /// Waits until the windows' surface is drawn `height` tall (its
+    /// group's height) with its group 14 px over the desktops' tiles (or
+    /// dots) as drawn at the same moment: where it is, and the tiles' top.
+    /// Each is a surface of its own, and the shell's commits come in
+    /// either order: as the bar settles, the windows can already sit over
+    /// the tiles' new place while the tiles still show at their old one
+    /// (#961).
+    fn over_the_tiles(&mut self, height: i32) -> anyhow::Result<(Rect, i32)> {
+        let both = |hp: &Headless| {
+            let tiles = hp.drawn_layers(DESKTOPS_NAMESPACE).first()?.1.y + ROOM;
+            let group = hp.drawn_layers(WINDOWS_NAMESPACE).first()?.1;
+            Some((group, tiles))
+        };
+        let done = self.hp.dispatch_until(WAIT, |hp| {
+            both(hp).is_some_and(|(group, tiles)| {
+                group.height == height + 2 * ROOM && group.y + group.height - ROOM + GAP == tiles
+            })
+        })?;
+        anyhow::ensure!(
+            done,
+            "the windows never {height} px tall 14 px over the tiles: {:?} over {:?}",
+            self.hp.layer_rects(WINDOWS_NAMESPACE),
+            self.hp.layer_rects(DESKTOPS_NAMESPACE)
+        );
+        both(&self.hp).ok_or_else(|| anyhow::anyhow!("no windows or no tiles drawn"))
     }
 
     /// Waits until client `app` was asked to close its window.
@@ -583,9 +605,7 @@ fn up_to_three_lines_the_focused_first_and_lit() -> anyhow::Result<()> {
     anyhow::ensure!(focused.as_deref() == Some(FIREFOX.0), "{focused:?}");
     bed.shows(&format!("«{}»*; «{}»", FIREFOX.1, FOOT.1))?;
     // Two 30 px lines, 14 px over the desktops' tiles, at the bar's side.
-    let tiles = bed.tiles_top()?;
-    let group = bed.group_of(2 * LINE)?;
-    assert_eq!(group.y + group.height - ROOM + GAP, tiles);
+    let (group, tiles) = bed.over_the_tiles(2 * LINE)?;
     assert_eq!(group.x, FULL_X);
     bed.shot("two")?;
     bed.open("test.trois", "Trois")?;
@@ -676,9 +696,7 @@ fn past_three_windows_plus_n_opens_the_overview() -> anyhow::Result<()> {
         "«Notes de réunion»*; «bar.md — hocus-panda — Visual Studio Code»; \
          «Téléchargements»; + 2 autres",
     )?;
-    let tiles = bed.tiles_top()?;
-    let group = bed.group_of(3 * LINE + MORE)?;
-    assert_eq!(group.y + group.height - ROOM + GAP, tiles);
+    bed.over_the_tiles(3 * LINE + MORE)?;
     bed.shot("five")?;
     // "+ 2 autres": the overview, every window of the desktop laid out
     // (8.5 A); the bar stays in front, and takes the clicks.
@@ -955,9 +973,7 @@ fn the_mini_form_lists_them_in_a_popover() -> anyhow::Result<()> {
     bed.open("org.gnome.TextEditor", "Notes de réunion")?;
     bed.last_is(AT_REST, &["form=mini", "item=Some(\"Notes de réunion\")"])?;
     // The item, 44 × 34, 14 px over the dots.
-    let dots = bed.tiles_top()?;
-    let item = bed.group_of(34)?;
-    assert_eq!(item.y + item.height - ROOM + GAP, dots);
+    let (item, _) = bed.over_the_tiles(34)?;
     // A click opens the popover: three lines and "+ 1 autre".
     bed.click("Windows")?;
     bed.last_is(
