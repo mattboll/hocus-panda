@@ -13,13 +13,14 @@ use smithay::{
     input::keyboard::Keycode,
     output::Output,
     reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface},
-    utils::{IsAlive, Logical, Point, SERIAL_COUNTER},
+    utils::{IsAlive, Logical, Point, SERIAL_COUNTER, Size},
     wayland::{
         compositor::with_states,
         shell::{
             wlr_layer::{
-                KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, LayerSurfaceData,
-                WlrLayerShellHandler, WlrLayerShellState,
+                Anchor, ExclusiveZone, KeyboardInteractivity, Layer,
+                LayerSurface as WlrLayerSurface, LayerSurfaceCachedState, LayerSurfaceData,
+                Margins, WlrLayerShellHandler, WlrLayerShellState,
             },
             xdg::PopupSurface,
         },
@@ -158,6 +159,77 @@ impl State {
     }
 }
 
+/// Margins that would leave layer surface `surface` no room on `output`
+/// held to it, before it is arranged: smithay would configure it with a
+/// negative size, which the client reads as a huge one and dies of (#942:
+/// a bar's piece, its margins asked again at a new text size a moment
+/// before its column gives it its new place).
+fn hold_margins(surface: &WlSurface, output: &Output, whole: Option<Size<i32, Logical>>) {
+    let zone = layer_map_for_output(output).non_exclusive_zone().size;
+    with_states(surface, |states| {
+        let mut cached = states.cached_state.get::<LayerSurfaceCachedState>();
+        let state = cached.current();
+        let room = match state.exclusive_zone {
+            ExclusiveZone::DontCare => whole.unwrap_or(zone),
+            _ => zone,
+        };
+        let m = state.margin;
+        let asked = (m.top, m.right, m.bottom, m.left);
+        let (top, right, bottom, left) = held(asked, state.anchor, (room.w, room.h));
+        if (top, right, bottom, left) != asked {
+            tracing::debug!(
+                ?asked,
+                top,
+                right,
+                bottom,
+                left,
+                "a layer surface's margins held to its screen"
+            );
+            state.margin = Margins {
+                top,
+                right,
+                bottom,
+                left,
+            };
+        }
+    });
+}
+
+/// Margins (top, right, bottom, left) for a surface anchored to `anchor`,
+/// each axis leaving at least a pixel of `room` (width, height); the
+/// second edge's gives way first.
+fn held(
+    (mut top, mut right, mut bottom, mut left): (i32, i32, i32, i32),
+    anchor: Anchor,
+    (width, height): (i32, i32),
+) -> (i32, i32, i32, i32) {
+    let hold = |first: &mut i32, second: &mut i32, at_first: bool, at_second: bool, room: i32| {
+        let mut over = i32::from(at_first) * *first + i32::from(at_second) * *second - (room - 1);
+        for (side, anchored) in [(second, at_second), (first, at_first)] {
+            if over > 0 && anchored && *side > 0 {
+                let taken = over.min(*side);
+                *side -= taken;
+                over -= taken;
+            }
+        }
+    };
+    hold(
+        &mut top,
+        &mut bottom,
+        anchor.contains(Anchor::TOP),
+        anchor.contains(Anchor::BOTTOM),
+        height,
+    );
+    hold(
+        &mut left,
+        &mut right,
+        anchor.contains(Anchor::LEFT),
+        anchor.contains(Anchor::RIGHT),
+        width,
+    );
+    (top, right, bottom, left)
+}
+
 /// A commit of a layer surface: arranged again, configured the first time.
 pub fn handle_commit(state: &mut State, surface: &WlSurface) {
     let outputs: Vec<Output> = state.space.outputs().cloned().collect();
@@ -219,6 +291,8 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
             hocus_link::CURTAIN_NAMESPACE => state.curtain_committed(&layer, &output),
             _ => {}
         }
+        let whole = state.space.output_geometry(&output).map(|g| g.size);
+        hold_margins(surface, &output, whole);
         let before = state.work_area(&output);
         layer_map_for_output(&output).arrange();
         if state.work_area(&output) != before {
@@ -472,5 +546,45 @@ impl State {
             );
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn margins(top: i32, right: i32, bottom: i32, left: i32) -> (i32, i32, i32, i32) {
+        (top, right, bottom, left)
+    }
+
+    /// #942: margins past the screen are held so that a pixel is left; the
+    /// others, and those of an edge not anchored, stay as asked.
+    #[test]
+    fn margins_past_the_screen_are_held_to_it() {
+        let right_top = Anchor::TOP | Anchor::RIGHT;
+        let room = (1920, 1080);
+        assert_eq!(
+            held(margins(1377, 12, 0, 0), right_top, room),
+            margins(1079, 12, 0, 0)
+        );
+        assert_eq!(
+            held(margins(700, 12, 0, 0), right_top, room),
+            margins(700, 12, 0, 0)
+        );
+        // Both edges anchored: the bottom gives way first.
+        let column = Anchor::TOP | Anchor::BOTTOM | Anchor::RIGHT;
+        assert_eq!(
+            held(margins(900, 12, 400, 0), column, room),
+            margins(900, 12, 179, 0)
+        );
+        // An edge not anchored takes no room.
+        assert_eq!(
+            held(
+                margins(0, 12, 5000, 3000),
+                Anchor::TOP | Anchor::RIGHT,
+                room
+            ),
+            margins(0, 12, 5000, 3000)
+        );
     }
 }
