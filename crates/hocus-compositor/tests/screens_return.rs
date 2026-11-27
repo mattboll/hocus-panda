@@ -532,6 +532,12 @@ fn the_winking_panda_says_what_moved_for_4_s() -> anyhow::Result<()> {
     hp.pointer_move(1920.0 + 1280.0, 720.0);
     open(&mut hp, "firefox", (600, 400))?;
     open(&mut hp, "foot", (600, 400))?;
+    // Its 4 s count from the moment it is told, the clock held from then:
+    // plugged above, a set never seen, the panda offering « Recopier » may
+    // be out already, and the one saying what moved takes its place as it
+    // is, its first frame long gone on a loaded machine (#962).
+    hp.hold_clock();
+    let told = hp.now();
     hp.unplug(SECOND)?;
     assert!(hp.screens_peek_out(), "the panda comes out");
     let shown = hp.dispatch_until(WAIT, |hp| {
@@ -547,9 +553,7 @@ fn the_winking_panda_says_what_moved_for_4_s() -> anyhow::Result<()> {
     let said = hp.dispatch_until(WAIT, |_| common::logged(&log).contains(line))?;
     assert!(said, "{}", common::logged(&log));
     // Still out at 3.9 s, going back from 4 s.
-    let since = hp.peek_since().unwrap_or_default();
-    hp.hold_clock();
-    while hp.now() < since + Duration::from_millis(3900) {
+    while hp.now() < told + Duration::from_millis(3900) {
         hp.step(common::STEP)?;
     }
     assert!(hp.screens_peek_out());
