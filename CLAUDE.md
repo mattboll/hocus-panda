@@ -184,6 +184,43 @@ agents, the phone, the VM, the package…) is in
 [docs/dev/reference.md](docs/dev/reference.md), one `##` section per
 part: `grep -n '^## ' docs/dev/reference.md`, then read that section only.
 
+## Running a sprint
+
+"Lance le sprint N" (run sprint N) makes this session the sprint's
+coordinator. A coordinator does not code, and reads neither code nor
+whole logs: its conversation grows by a few lines a ticket, and each
+ticket's work stays in its own agent's.
+
+1. **The tickets** are the open issues of the milestone "Sprint N — …"
+   (`gh issue list --milestone "<its title>" --state open`), in the order
+   and with the dependencies their bodies give. The branch is
+   `sprint/N` from `main`; create it if it does not exist yet. A ticket
+   whose spec (or mockup, for anything visible) is not approved is left
+   out and named in the final summary.
+2. **One fresh agent a ticket** (the Agent tool), one at a time, in this
+   checkout: no worktrees. Its brief, about ten lines: the issue, the spec
+   sections it cites, the files to start from, the branch
+   `<type>/<short-name>` to take from `sprint/N`, and "follow CLAUDE.md
+   (Workflow, Budget): the tests of the crates you change, the full suite
+   once at the end; commit, do not push or merge; answer in five lines at
+   most: what changed, the tests, what is left or doubtful."
+3. **After each agent**: merge its branch `--no-ff` into `sprint/N`, push,
+   and follow that push's CI (`gh run watch`, its result only). A test
+   CI reports FLAKY or that fails by chance gets an issue the same day,
+   and its quarantine (docs/workflow.md, "A test that fails by chance").
+   One line in the project's memory, then the next ticket. Issues are
+   closed by the sprint's pull request, not by hand.
+4. **Stop and ask the maintainer** when an agent is stuck, when a test
+   fails and no one can say why, when a merged push's CI is red for
+   another reason than a chance failure, when the spec does not say, and
+   before anything public outside this repository. An agent that ran long
+   left where it stands in its issue: one fresh agent continues from that
+   note; if it stops again, ask.
+5. **At the end**: every ticket merged and CI green, the sprint's pull
+   request to `main` as Workflow says, not merged (a sprint is done when
+   the maintainer accepted it), and a summary to the maintainer, one line
+   a ticket, and the package to try.
+
 ## Budget: context and agents
 
 Every turn of an agent reads its whole conversation again: what it reads
