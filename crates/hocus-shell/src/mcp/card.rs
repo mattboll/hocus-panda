@@ -202,7 +202,11 @@ pub fn place(words: Words, card: &McpCard) -> ((u32, u32), (i32, i32)) {
         + NOTE * LINE;
     (
         (WIDTH as u32, height.ceil() as u32),
-        (card.x + BESIDE.0, card.y + BESIDE.1),
+        // In the card's own pixels, at the text size.
+        (
+            crate::layer::from_screen(card.x) + BESIDE.0,
+            crate::layer::from_screen(card.y) + BESIDE.1,
+        ),
     )
 }
 

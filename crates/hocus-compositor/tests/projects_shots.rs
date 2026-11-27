@@ -388,6 +388,115 @@ impl Line {
     }
 }
 
+/// #942: at a text size of 150 %, on the 1440 × 900 screen: the actions
+/// palette, the emoji picker, a project's card and the lock screen, for the
+/// maintainer to compare with 100 %. Written to `$HOCUS_SHOTS`.
+#[test]
+#[ignore = "screenshots for the maintainer, by hand"]
+fn the_palette_the_picker_a_card_and_the_lock_at_150() -> anyhow::Result<()> {
+    const KEY_P: u32 = 25;
+    const KEY_DOT: u32 = 52;
+    let Some(out) = std::env::var_os("HOCUS_SHOTS") else {
+        eprintln!("HOCUS_SHOTS names no folder");
+        return Ok(());
+    };
+    let out = PathBuf::from(out);
+    std::fs::create_dir_all(&out)?;
+    let shell = common::shell_program();
+    let dir = tempfile::tempdir()?;
+    let at = |sub: &str| -> anyhow::Result<PathBuf> {
+        let path = dir.path().join(sub);
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    };
+    let home = at("home")?;
+    let panda = repo(&home, "github/hocus-panda", Duration::from_secs(900))?;
+    let env = [
+        ("HOME", home.display().to_string()),
+        ("XDG_CONFIG_HOME", at("config")?.display().to_string()),
+        ("XDG_CACHE_HOME", at("cache")?.display().to_string()),
+        ("XDG_STATE_HOME", at("state")?.display().to_string()),
+        ("XDG_DATA_HOME", at("data")?.display().to_string()),
+        ("LC_ALL", "fr_FR.UTF-8".to_owned()),
+        ("LANG", "fr_FR.UTF-8".to_owned()),
+        ("HOCUS_USER_NAME", "Alex".to_owned()),
+    ];
+    let script = common::shell_script(dir.path(), &shell, &env)?;
+    let mut config = Config::default();
+    config.locale.language = hocus_link::locale::Language::Chosen(hocus_words::Lang::French);
+    config.home = Some(home.clone());
+    config.state_dir = Some(at("state/hocuspanda")?);
+    config.appearance.text_scale = hocus_link::TextScale(150);
+    let mut hp = Headless::start_with_shell(
+        HeadlessConfig {
+            outputs: vec!["1440x900".parse()?],
+            renderer: RendererChoice::Pixman,
+            ..HeadlessConfig::default()
+        },
+        config,
+        Some(script),
+    )?;
+    let up = hp.dispatch_until(WAIT, |hp| {
+        hp.drawn_layers(hocus_link::DESKTOPS_NAMESPACE).len() == 1
+    })?;
+    anyhow::ensure!(up, "no desktops' tiles");
+    hp.pointer_move(500.0, 450.0);
+    let _clients = [
+        window(
+            &mut hp,
+            "firefox",
+            "#942 Text size — Mozilla Firefox",
+            (690, 470),
+        )?,
+        window(&mut hp, "kitty", "Claude Code — hocus-panda", (620, 460))?,
+    ];
+    wait(&mut hp, Duration::from_millis(400))?;
+    let mut line = Line::open(&mut hp)?;
+    line.make(&mut hp, 1, "hocus-panda", &panda)?;
+    // The palette.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_P]);
+    drawn(&mut hp, hocus_link::ACTIONS_NAMESPACE)?;
+    shoot(&mut hp, &out, "150-palette", None)?;
+    press(&mut hp, KEY_ESC);
+    let gone = hp.dispatch_until(WAIT, |hp| {
+        hp.drawn_layers(hocus_link::ACTIONS_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(gone, "the palette stays");
+    // The emoji picker.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_DOT]);
+    drawn(&mut hp, hocus_link::EMOJI_NAMESPACE)?;
+    shoot(&mut hp, &out, "150-emoji", None)?;
+    press(&mut hp, KEY_ESC);
+    let gone = hp.dispatch_until(WAIT, |hp| {
+        hp.drawn_layers(hocus_link::EMOJI_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(gone, "the picker stays");
+    // The project's card, from its name in the overview.
+    chord(&mut hp, &[KEY_LEFTMETA, KEY_W]);
+    wait(&mut hp, Duration::from_millis(400))?;
+    let name = hp.overview_project_name(SCREEN, 0).context("no name")?;
+    hp.pointer_move(name.0, name.1);
+    wait(&mut hp, Duration::from_millis(100))?;
+    hp.button(common::BTN_LEFT, true);
+    hp.button(common::BTN_LEFT, false);
+    drawn(&mut hp, hocus_link::PROJECT_CARD_NAMESPACE)?;
+    hp.pointer_move(1400.0, 880.0);
+    wait(&mut hp, Duration::from_millis(300))?;
+    shoot(&mut hp, &out, "150-project-card", None)?;
+    press(&mut hp, KEY_ESC);
+    wait(&mut hp, Duration::from_millis(300))?;
+    press(&mut hp, KEY_ESC);
+    let gone = hp.dispatch_until(WAIT, |hp| hp.overview().is_none())?;
+    anyhow::ensure!(gone, "the overview stays");
+    // The lock.
+    hp.lock();
+    let locked = hp.dispatch_until(WAIT, |hp| hp.lock_drawn_on().len() == 1)?;
+    anyhow::ensure!(locked, "no lock");
+    wait(&mut hp, Duration::from_millis(800))?;
+    shoot(&mut hp, &out, "150-lock", None)?;
+    Ok(())
+}
+
 // --- Lot B -----------------------------------------------------------------------
 
 /// The agent's session (lot D).

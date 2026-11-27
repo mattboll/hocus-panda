@@ -1302,7 +1302,7 @@ impl State {
         );
         if self.shell.software {
             let own = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
-            let radius = (hocus_link::actions::ACTIONS_RADIUS * scale).round() as i32;
+            let radius = (shown.radius() * scale).round() as i32;
             out.extend(surfaces.into_iter().map(|e| {
                 OutputElements::Bar(Rounded::new(e, own, radius, Outside::Cropped, scale))
             }));

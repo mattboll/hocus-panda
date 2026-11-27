@@ -12,7 +12,8 @@
 //! goes back; an impossible action stays inert; nothing found searches in
 //! the launcher; a switch shows its state and turns over; log out asks
 //! first; `Esc` and the target closing close it; at rest nothing is drawn;
-//! screen readers read it as a dialog with its rows.
+//! screen readers read it as a dialog with its rows; at a larger text
+//! size, it is that much larger and still centred (#942).
 //!
 //! Pixman here, so the shell draws on the CPU, as in CI.
 
@@ -463,6 +464,40 @@ fn super_p_opens_on_the_focused_windows_screen_ringed_above_the_dim() -> anyhow:
     anyhow::ensure!(read, "the shortcut was never read");
     let shows = bed.open()?;
     assert!(shows.contains("Réduire <Super M>"), "{shows}");
+    Ok(())
+}
+
+/// #942: at a text size of 150 %, the palette is drawn that much larger,
+/// as far under the screen's top, still centred in the work area.
+#[test]
+fn at_the_text_size_it_is_larger_and_still_centred() -> anyhow::Result<()> {
+    let Some(mut bed) = Bed::one_screen()? else {
+        return Ok(());
+    };
+    bed.window("kitty", "kitty")?;
+    bed.open()?;
+    let (_, small) = bed.hp.actions_surfaces()[0].clone();
+    bed.press(KEY_ESC);
+    bed.closed()?;
+    let from = bed.mark();
+    std::fs::write(
+        &bed.file,
+        "[keyboard]\nlayouts = [\"us\"]\n\n[appearance]\ntext-scale = 1.5\n",
+    )?;
+    bed.logged_after(from, "the text size")?;
+    bed.open()?;
+    let (_, large) = bed.hp.actions_surfaces()[0].clone();
+    assert_eq!((large.y, large.width), (96, 1080), "{large:?}");
+    assert!(
+        (f64::from(large.height) - f64::from(small.height) * 1.5).abs() <= 2.0,
+        "{small:?} then {large:?}"
+    );
+    let area = bed.hp.work_area().context("no work area")?;
+    let centre = large.x + large.width / 2;
+    assert!(
+        (centre - (area.x + area.width / 2)).abs() <= 1,
+        "{large:?} in {area:?}"
+    );
     Ok(())
 }
 

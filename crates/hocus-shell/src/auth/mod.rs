@@ -849,7 +849,9 @@ impl Auth {
             return Vec::new();
         }
         let id = window::Id::unique();
-        let top = (f64::from(at.height) / 2.0 - AUTH_TOP).max(8.0).round() as i32;
+        // In the dialog's own pixels, at the text size.
+        let height = crate::layer::from_screen(at.height);
+        let top = (f64::from(height) / 2.0 - AUTH_TOP).max(8.0).round() as i32;
         let output = at.output.clone();
         match shown {
             Shown::Polkit(dialog) => {
@@ -867,7 +869,8 @@ impl Auth {
                 dialog.size = size;
                 let app = view::who(dialog).0;
                 if let Some(icon) = view::who(dialog).1 {
-                    let scale = dialog.at.as_ref().map_or(1.0, |a| a.scale as f32 / 120.0);
+                    let scale = dialog.at.as_ref().map_or(1.0, |a| a.scale as f32 / 120.0)
+                        * crate::layer::text_factor();
                     crate::launcher::icons::want([icon.as_str()], view::ICON_PX, scale);
                 }
                 tracing::debug!(

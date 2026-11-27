@@ -108,7 +108,8 @@ impl State {
                 let p = out_cubic(part(now.saturating_sub(at), PILL_IN));
                 PillLook {
                     alpha: p as f32,
-                    rise: (1.0 - p) * PILL_RISE,
+                    // At the text size, as the shell draws the pill.
+                    rise: (1.0 - p) * PILL_RISE * self.zoom_of(hocus_link::CURTAIN_NAMESPACE),
                 }
             }
         };
@@ -166,6 +167,8 @@ impl State {
             return;
         };
         let scale = output.current_scale().fractional_scale();
+        // The pill's corners and shadow at the text size.
+        let zoom = self.zoom_of(hocus_link::CURTAIN_NAMESPACE);
         if let Some(layer) = pill_output
             .filter(|_| pill.alpha > 0.0)
             .and_then(|name| self.curtain_layer(output, name))
@@ -185,7 +188,7 @@ impl State {
                 if self.shell.software {
                     // The CPU's buffers have no alpha: cut to its corners.
                     let clip = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
-                    let radius = (PILL_RADIUS * scale).round() as i32;
+                    let radius = (PILL_RADIUS * zoom * scale).round() as i32;
                     out.extend(surfaces.into_iter().map(|e| {
                         OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped, scale))
                     }));
@@ -193,6 +196,7 @@ impl State {
                     out.extend(surfaces.into_iter().map(OutputElements::Surface));
                     let mut style = crate::popover::SHADOW;
                     style.radius = PILL_RADIUS;
+                    let style = style.zoomed(zoom);
                     out.extend(
                         shadow_elements(
                             renderer,

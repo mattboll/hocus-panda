@@ -551,9 +551,10 @@ where
         .outputs()
         .map(|o| (o.name(), o.current_scale().fractional_scale()))
         .collect();
-    let asks = state
-        .share
-        .take_thumbs(|name| scales.get(name).copied().unwrap_or(1.0));
+    let asks = state.share.take_thumbs(
+        |name| scales.get(name).copied().unwrap_or(1.0),
+        state.zoom_of(hocus_link::SHARE_CHOOSER_NAMESPACE),
+    );
     if asks.is_empty() {
         return;
     }

@@ -178,6 +178,11 @@ fn size_at(said: &Said, left: i32, bottom: i32) -> ((u32, u32), (i32, i32)) {
     let width = PAD.left + MARK + GAP + text + GAP + buttons + PAD.right;
     let height = PAD.top + (SAID + UNDER) * LINE + PAD.bottom;
     let (w, h) = (width.ceil() as u32 + 2, height.ceil() as u32 + 2);
+    // In the toast's own pixels, at the text size.
+    let (left, bottom) = (
+        crate::layer::from_screen(left),
+        crate::layer::from_screen(bottom),
+    );
     ((w, h), (left, bottom - h as i32))
 }
 

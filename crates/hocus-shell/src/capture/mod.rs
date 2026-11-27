@@ -479,7 +479,7 @@ pub fn recorded(recorded: Recorded) {
         }),
     };
     keep_shot(shot.clone());
-    let scale = crate::popover::kit::scale(&shot.output);
+    let scale = crate::popover::kit::drawn_scale(&shot.output);
     let started = std::thread::Builder::new()
         .name("recording's thumbnail".to_owned())
         .spawn(move || {
@@ -624,7 +624,7 @@ pub fn captured(captured: Captured) {
         video: None,
     };
     keep_shot(shot.clone());
-    let scale = crate::popover::kit::scale(&shot.output);
+    let scale = crate::popover::kit::drawn_scale(&shot.output);
     let started = std::thread::Builder::new()
         .name("capture's thumbnail".to_owned())
         .spawn(move || match read_image(&shot.file) {

@@ -184,20 +184,22 @@ enum Pic {
         scale: u32,
     },
     /// Every desktop's (#944): a desktop's label, or what letting go there
-    /// does, 13.5 px.
+    /// does, 13.5 px at the text size `zoom` (hundredths, #942).
     GridWords {
         text: String,
         ink: [u8; 4],
         bold: bool,
         scale: u32,
+        zoom: u32,
     },
     /// A project's label under its desktop: its monogram, "2 · name",
-    /// its folder, on one line.
+    /// its folder, on one line, at the text size `zoom`.
     GridProject {
         mono: String,
         title: String,
         folder: String,
         scale: u32,
+        zoom: u32,
     },
     /// The agents' badge's pill for a 26 px panda, its words 11.5 px.
     SmallPill {
@@ -373,14 +375,23 @@ fn draw(fonts: &Fonts, pic: &Pic, scale: f64) -> Option<(Vec<u8>, (i32, i32))> {
             ..
         } => draw_project(fonts, (mono, title, folder, holds), *current, *width, scale),
         Pic::GridWords {
-            text, ink, bold, ..
-        } => grid::draw_words(fonts, text, *ink, *bold, scale),
+            text,
+            ink,
+            bold,
+            zoom,
+            ..
+        } => grid::draw_words(fonts, text, *ink, *bold, scale * f64::from(*zoom) / 100.0),
         Pic::GridProject {
             mono,
             title,
             folder,
+            zoom,
             ..
-        } => grid::draw_project(fonts, (mono, title, folder), scale),
+        } => grid::draw_project(
+            fonts,
+            (mono, title, folder),
+            scale * f64::from(*zoom) / 100.0,
+        ),
         Pic::SmallPill { words, state, .. } => {
             draw_pill_sized(fonts, words, *state, grid::PANDA, grid::BADGE_TEXT, scale)
         }

@@ -113,7 +113,7 @@ pub struct Made {
 }
 
 impl Made {
-    /// What `capture` shows at the screen's `scale`.
+    /// What `capture` shows at `scale`, the screen's times the text size.
     pub fn of(capture: &marks::Image, scale: f32) -> Self {
         let room = (WIDTH - 2.0 * PAD) * scale;
         let (w, h) = fit(capture.dimensions(), (room, IMAGE * scale));

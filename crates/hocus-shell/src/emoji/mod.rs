@@ -590,7 +590,17 @@ impl Picker {
             return effects;
         }
         let surface = window::Id::unique();
-        let screen = (screen.0 as f32, screen.1 as f32);
+        // The screen and the caret in the picker's own pixels, at the text
+        // size.
+        let screen = (
+            crate::layer::from_screen(screen.0) as f32,
+            crate::layer::from_screen(screen.1) as f32,
+        );
+        let at = match at {
+            EmojiAt::Caret(r) => EmojiAt::Caret(crate::layer::rect_from_screen(r)),
+            EmojiAt::Window(r) => EmojiAt::Window(crate::layer::rect_from_screen(r)),
+            EmojiAt::Screen => EmojiAt::Screen,
+        };
         let mut open = Open {
             surface,
             at,
@@ -996,5 +1006,37 @@ mod tests {
         let due = picker.due().expect("a tick due");
         assert_eq!(picker.update(Come::Tick, due), vec![Effect::Remove(id)]);
         assert!(!picker.is_surface(id));
+    }
+
+    /// #942: at 150 %, the picker is asked that much larger, and its
+    /// margins, multiplied back, put it under the caret the compositor
+    /// said and inside the screen.
+    #[test]
+    fn at_the_text_size_it_opens_larger_under_the_caret() {
+        let _ = crate::layer::text_scale(hocus_link::TextScale(150));
+        let mut picker = Picker::default();
+        let caret = Rect {
+            x: 900,
+            y: 300,
+            width: 1,
+            height: 20,
+        };
+        let effects = picker.update(
+            Come::Toggle {
+                output: "eDP-1".into(),
+                screen: (2560, 1440),
+                at: EmojiAt::Caret(caret),
+            },
+            Instant::now(),
+        );
+        let Some(Effect::Emoji { size, margin, .. }) = effects.first() else {
+            panic!("its surface opened: {effects:?}");
+        };
+        let on_screen = |px: i32| f64::from(px) * 1.5;
+        assert!((on_screen(margin.3) - 900.0).abs() <= 1.0, "{margin:?}");
+        let under = on_screen(margin.0) - 320.0;
+        assert!((under - f64::from(UNDER) * 1.5).abs() <= 1.0, "{margin:?}");
+        let bottom = on_screen(margin.0 + size.1 as i32);
+        assert!(bottom <= 1440.0 - f64::from(EDGE) * 1.5 + 1.0, "{size:?}");
     }
 }

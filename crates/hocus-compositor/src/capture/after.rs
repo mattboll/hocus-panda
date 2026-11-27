@@ -496,8 +496,10 @@ impl State {
             };
             let alpha = p as f32;
             if alpha > 0.0 {
+                // Its rise, corners and shadow at the text size.
+                let zoom = self.zoom_of(hocus_link::CAPTURE_THUMB_NAMESPACE);
                 let mut at = geometry.to_f64();
-                at.loc.y += CAPTURE_THUMB_RISE * (1.0 - p);
+                at.loc.y += CAPTURE_THUMB_RISE * zoom * (1.0 - p);
                 let loc: Point<i32, Physical> = at.loc.to_physical_precise_round(scale);
                 let surfaces: Vec<WaylandSurfaceRenderElement<R>> =
                     AsRenderElements::<R>::render_elements(
@@ -509,7 +511,7 @@ impl State {
                     );
                 if self.shell.software {
                     let clip = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
-                    let radius = (CAPTURE_THUMB_RADIUS * scale).round() as i32;
+                    let radius = (CAPTURE_THUMB_RADIUS * zoom * scale).round() as i32;
                     out.extend(surfaces.into_iter().map(|e| {
                         OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped, scale))
                     }));
@@ -521,7 +523,7 @@ impl State {
                         renderer,
                         &self.textures,
                         &self.capture.after.shadow,
-                        THUMB_SHADOW,
+                        THUMB_SHADOW.zoomed(zoom),
                         at,
                         scale,
                         alpha,

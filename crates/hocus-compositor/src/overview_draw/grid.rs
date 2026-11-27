@@ -504,12 +504,16 @@ impl State {
         R::TextureId: Send + Clone + Texture + 'static,
     {
         let scale = c.scale;
+        // At the text size (#942): the room under a desktop holds it up
+        // to 150 %.
+        let zoom = self.text_scale().0;
         let pic = match self.grid_label(output, desktop) {
             level::Label::Drop(text) => Pic::GridWords {
                 text,
                 ink: DROP_INK,
                 bold: true,
                 scale: milli(scale),
+                zoom,
             },
             level::Label::Project {
                 mono,
@@ -520,12 +524,14 @@ impl State {
                 title,
                 folder,
                 scale: milli(scale),
+                zoom,
             },
             level::Label::Number(text) => Pic::GridWords {
                 text,
                 ink: DIM_INK,
                 bold: false,
                 scale: milli(scale),
+                zoom,
             },
         };
         let Some((_, (w, _), _)) = self.overview_paint.picture(&pic, scale) else {
@@ -624,18 +630,21 @@ mod tests {
                     ink: DIM_INK,
                     bold: false,
                     scale: milli(scale),
+                    zoom: 100,
                 },
                 Pic::GridWords {
                     text: "Lâcher : bureau 3".into(),
                     ink: DROP_INK,
                     bold: true,
                     scale: milli(scale),
+                    zoom: 150,
                 },
                 Pic::GridProject {
                     mono: "HS".into(),
                     title: "2 · hocus-site".into(),
                     folder: "~/github/hocus-site".into(),
                     scale: milli(scale),
+                    zoom: 130,
                 },
                 Pic::SmallPill {
                     words: "1 t’attend".into(),

@@ -1798,13 +1798,27 @@ fn the_text_size_scales_lengths_and_names_its_surfaces() {
     }
     assert!(follow_text_scale(&bubble_namespace(3)));
     assert!(follow_text_scale(&reminder_namespace(2)));
-    for kept in [
+    // #942: every surface of the shell's, none of another program's.
+    for followed in [
         LOCK_NAMESPACE,
         AUTH_NAMESPACE,
+        CURTAIN_NAMESPACE,
         CAPTURE_TOOLBAR_NAMESPACE,
+        CAPTURE_THUMB_NAMESPACE,
+        CAPTURE_EDITOR_NAMESPACE,
+        SHARE_CHOOSER_NAMESPACE,
+        ACTIONS_NAMESPACE,
         EMOJI_NAMESPACE,
+        PROJECT_FORM_NAMESPACE,
+        PROJECT_CARD_NAMESPACE,
+        PROJECT_CLOSE_NAMESPACE,
         MCP_TAG_NAMESPACE,
+        MCP_TOAST_NAMESPACE,
+        MCP_CARD_NAMESPACE,
     ] {
+        assert!(follow_text_scale(followed), "{followed}");
+    }
+    for kept in ["waybar", "", "hocuspanda-camera"] {
         assert!(!follow_text_scale(kept), "{kept}");
     }
 }

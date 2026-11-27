@@ -76,11 +76,13 @@ fn layout(show: &McpShow) -> (Size, Vec<String>) {
 /// Its size and its top left corner on its screen.
 pub fn place(show: &McpShow) -> ((u32, u32), (i32, i32)) {
     let (size, _) = layout(show);
+    // In the tag's own pixels, at the text size.
+    let on = crate::layer::from_screen;
     let at = match show.at {
-        McpAt::Window { x, y } => (x, y),
-        McpAt::Pointer { x, y } => (x + BESIDE.0, y + BESIDE.1),
+        McpAt::Window { x, y } => (on(x), on(y)),
+        McpAt::Pointer { x, y } => (on(x) + BESIDE.0, on(y) + BESIDE.1),
         McpAt::Desktop { x, y, .. } | McpAt::Screen { x, y } | McpAt::Bell { x, y } => {
-            (x - (size.width / 2.0).round() as i32, y)
+            (on(x) - (size.width / 2.0).round() as i32, on(y))
         }
     };
     ((size.width as u32, size.height as u32), at)

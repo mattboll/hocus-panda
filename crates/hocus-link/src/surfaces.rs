@@ -294,18 +294,16 @@ impl TextScale {
     }
 }
 
+/// What every namespace of the shell's surfaces starts with.
+pub const SHELL_PREFIX: &str = "hocus-";
+
 /// Whether the shell's surfaces of `namespace` are drawn at the text size
-/// ([`TextScale`]): the bar and everything of its (its pieces, its
-/// popovers, the peeking panda, its tooltips and its tray), the
-/// notifications' bubbles, the meetings' reminders beside it, and the
-/// launcher with its toast. The others (the lock, the capture's and the
-/// sharing's surfaces, the dialogs over a dimmed screen, the agents' tags
-/// on windows) keep their sizes.
+/// ([`TextScale`]): every one of the shell's (#942), the bar and
+/// everything of its, the bubbles, the reminders, the launcher, the lock,
+/// the authentication dialog, the capture's and the sharing's surfaces,
+/// the actions palette, the emoji picker, the projects' surfaces and the
+/// agents' tags, toasts and cards. A surface of another program's keeps
+/// its sizes.
 pub fn follow_text_scale(namespace: &str) -> bool {
-    namespace.starts_with(NAMESPACE)
-        || is_bubble(namespace)
-        || namespace == BUBBLES_WAITING_NAMESPACE
-        || is_reminder(namespace)
-        || namespace == LAUNCHER_NAMESPACE
-        || namespace == LAUNCHER_TOAST_NAMESPACE
+    namespace.starts_with(SHELL_PREFIX)
 }

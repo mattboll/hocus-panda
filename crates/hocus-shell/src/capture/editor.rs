@@ -139,7 +139,8 @@ pub struct Editor {
     /// `shown` and `blurred` in the renderer's memory, for as long as they
     /// show ([`draw::hold`]).
     pub held: Vec<Allocation>,
-    /// The screen's scale.
+    /// How many of the screen's pixels a pixel of the editor's takes: the
+    /// screen's scale times the text size.
     pub scale: f32,
     pub tool: Tool,
     pub colour: usize,
@@ -206,7 +207,7 @@ pub fn open(shot: Shot) {
     if with(|e| e.is_some()) {
         return;
     }
-    let scale = crate::popover::kit::scale(&shot.output);
+    let scale = crate::popover::kit::drawn_scale(&shot.output);
     let cached = super::decoded(shot.id);
     let started = std::thread::Builder::new()
         .name("capture's editor".to_owned())

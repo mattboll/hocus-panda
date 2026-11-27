@@ -528,7 +528,11 @@ impl Palette {
             return effects;
         }
         let surface = window::Id::unique();
-        let (area_x, area_width) = shown.area;
+        // The work area, in the palette's own pixels at the text size.
+        let (area_x, area_width) = (
+            crate::layer::from_screen(shown.area.0),
+            crate::layer::from_screen(shown.area.1),
+        );
         let width = view::width(area_width as f32);
         let mut open = Open {
             surface,

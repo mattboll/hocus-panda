@@ -8,13 +8,19 @@
 //! resizes, and forgotten as it closes.
 //!
 //! The text size (`[appearance] text-scale`, #928) is applied here alone.
-//! The surfaces that follow it ([`hocus_link::follow_text_scale`]: the
-//! bar's, the bubbles, the reminders, the launcher) say their sizes,
-//! margins and input regions at 100 %, the mockups' pixels; here they are
-//! asked of the compositor that many times larger, and iced draws them at
-//! that scale ([`zoom`]), so that everything in them, laid out in the
-//! mockups' pixels, grows alike. What they asked is kept, to be asked
-//! again at a new text size ([`text_scale`]).
+//! The surfaces that follow it ([`hocus_link::follow_text_scale`]: every
+//! one of the shell's, #942) say their sizes, margins and input regions at
+//! 100 %, the mockups' pixels; here they are asked of the compositor that
+//! many times larger, and iced draws them at that scale ([`zoom`]), so
+//! that everything in them, laid out in the mockups' pixels, grows alike.
+//! What they asked is kept, to be asked again at a new text size
+//! ([`text_scale`]).
+//!
+//! What the compositor says of the screen (a screen's size, a window's or
+//! a caret's place) is in its pixels: a surface placed by it takes it in
+//! its own first ([`from_screen`]), so that its margins, multiplied back
+//! here, land where the compositor said. What the shell tells the
+//! compositor of a place on a surface goes the other way ([`told`]).
 
 use std::{
     collections::HashMap,
@@ -134,16 +140,36 @@ fn scaled_rect(r: Rectangle, text: TextScale) -> Rectangle {
     }
 }
 
-/// The room a bar in `form` takes from its screen's edge, in the
-/// compositor's pixels at the text size: where a surface that keeps its
-/// sizes (a capture's thumbnail) goes beside it.
+/// The room a bar in `form` takes from its screen's edge, in the pixels
+/// of the surfaces that follow the text size: where one goes beside it
+/// (a capture's thumbnail).
 pub fn bar_room(form: hocus_link::Form) -> i32 {
-    let text = text();
-    text.whole(form.width()) + text.whole(hocus_link::EDGE)
+    form.width() + hocus_link::EDGE
+}
+
+/// A length on the screen, in the compositor's pixels, in the pixels a
+/// surface that follows the text size lays itself out in.
+pub fn from_screen(px: i32) -> i32 {
+    (f64::from(px) / text().factor()).round() as i32
+}
+
+/// A rectangle on the screen, in the compositor's pixels, in the pixels a
+/// surface that follows the text size lays itself out in.
+pub fn rect_from_screen(r: hocus_link::Rect) -> hocus_link::Rect {
+    let k = text().factor();
+    let x = (f64::from(r.x) / k).round() as i32;
+    let y = (f64::from(r.y) / k).round() as i32;
+    hocus_link::Rect {
+        x,
+        y,
+        width: (f64::from(r.x + r.width) / k).round() as i32 - x,
+        height: (f64::from(r.y + r.height) / k).round() as i32 - y,
+    }
 }
 
 /// `r`, on a surface that follows the text size, in the compositor's
-/// pixels: what the shell tells it of where things are on the bar.
+/// pixels: what the shell tells it of where things are on its surfaces
+/// (the bar's pieces, the sharing's thumbnails).
 pub fn told(r: Rectangle) -> [i32; 4] {
     let r = scaled_rect(r, text());
     [
@@ -344,7 +370,8 @@ mod tests {
 
     /// #928: a surface that follows the text size is asked of the
     /// compositor at it, opened and moved, and again when it changes; iced
-    /// draws it at it. One that keeps its sizes is asked as it says.
+    /// draws it at it. Another program's keeps its sizes (#942: every
+    /// one of the shell's follows it).
     #[test]
     fn the_text_size_scales_the_surfaces_that_follow_it_only() {
         let open_as = |namespace: &str| {
@@ -365,9 +392,9 @@ mod tests {
         let (bubble, opened) = open_as(&hocus_link::bubble_namespace(4));
         assert_eq!(opened, (size((364, 0)), Some(margin((10, 276, 0, 0)))));
         assert!((zoom(bubble) - 1.3).abs() < 1e-6);
-        let (lock, opened) = open_as(hocus_link::LOCK_NAMESPACE);
+        let (other, opened) = open_as("another-program");
         assert_eq!(opened, (size((280, 0)), Some(margin((8, 212, 0, 0)))));
-        assert!((zoom(lock) - 1.0).abs() < f32::EPSILON);
+        assert!((zoom(other) - 1.0).abs() < f32::EPSILON);
         assert!(matches!(
             resize(bubble, (100, 40)),
             Some(Message::LayoutChange { size: s, .. }) if s == size((130, 52))
@@ -383,7 +410,7 @@ mod tests {
                 iced::Size::new(10.0, 10.0),
             )],
         );
-        // Back to 100 %: the bubble is asked again as it said, the lock
+        // Back to 100 %: the bubble is asked again as it said, the other
         // not at all.
         let again = text_scale(TextScale::NORMAL);
         assert_eq!(again.len(), 3, "its size, its margins, its input region");
@@ -402,5 +429,44 @@ mod tests {
             )),
             [-10, 4, 2, 2]
         );
+    }
+
+    /// #942: what the compositor says of the screen is taken in a
+    /// surface's own pixels at the text size; its margins, asked from
+    /// there, land back where the compositor said, within a pixel.
+    #[test]
+    fn a_place_on_the_screen_lands_back_where_the_compositor_said() {
+        let _ = text_scale(TextScale(150));
+        assert_eq!(from_screen(1920), 1280);
+        let caret = rect_from_screen(hocus_link::Rect {
+            x: 301,
+            y: 99,
+            width: 40,
+            height: 21,
+        });
+        assert_eq!(
+            caret,
+            hocus_link::Rect {
+                x: 201,
+                y: 66,
+                width: 26,
+                height: 14,
+            }
+        );
+        let id = window::Id::unique();
+        let settings = NewLayerShellSettings {
+            size: size((400, 300)),
+            margin: Some(margin((caret.y, 0, 0, caret.x))),
+            namespace: Some(hocus_link::EMOJI_NAMESPACE.to_owned()),
+            ..NewLayerShellSettings::default()
+        };
+        let Message::NewLayerShell { settings, .. } = open(id, settings) else {
+            panic!("not an opening");
+        };
+        let asked = settings.margin.expect("its margins");
+        assert!((asked.top - 99).abs() <= 1 && (asked.left - 301).abs() <= 1);
+        assert_eq!(settings.size, size((600, 450)));
+        // The bar's room, in the same pixels: the full bar and its edge.
+        assert_eq!(bar_room(hocus_link::Form::Full), 196 + hocus_link::EDGE);
     }
 }

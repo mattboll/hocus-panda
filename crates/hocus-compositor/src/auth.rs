@@ -370,6 +370,8 @@ impl State {
             return;
         };
         let scale = output.current_scale().fractional_scale();
+        // Its corners and shadow at the text size, as the shell draws it.
+        let zoom = self.zoom_of(hocus_link::AUTH_NAMESPACE);
         let look = look(shown.opened, shown.closing, now, self.auth_motion());
         let map = layer_map_for_output(output);
         let geometry = map
@@ -390,7 +392,7 @@ impl State {
             if self.shell.software {
                 // The CPU's buffers have no alpha: cut to its corners.
                 let clip = Rectangle::new(loc, geometry.size.to_physical_precise_round(scale));
-                let radius = (AUTH_RADIUS * scale).round() as i32;
+                let radius = (AUTH_RADIUS * zoom * scale).round() as i32;
                 out.extend(surfaces.into_iter().map(|e| {
                     OutputElements::Bar(Rounded::new(e, clip, radius, Outside::Cropped, scale))
                 }));
@@ -414,7 +416,7 @@ impl State {
                         renderer,
                         &self.textures,
                         &self.auth.shadow,
-                        SHADOW,
+                        SHADOW.zoomed(zoom),
                         geometry.to_f64(),
                         scale,
                         look.alpha,
