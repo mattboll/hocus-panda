@@ -56,6 +56,9 @@ use crate::{
     surfaces::{Asked, Context, Lent, Surface},
 };
 
+/// The room the dialog keeps from its screen's top and bottom.
+const EDGE: f32 = 8.0;
+const EDGE_F64: f64 = EDGE as f64;
 /// Wrong passwords in a row before the request is refused.
 pub const TRIES: u32 = 3;
 /// The characters the field keeps at most.
@@ -849,9 +852,7 @@ impl Auth {
             return Vec::new();
         }
         let id = window::Id::unique();
-        // In the dialog's own pixels, at the text size.
-        let height = crate::layer::from_screen(at.height);
-        let top = (f64::from(height) / 2.0 - AUTH_TOP).max(8.0).round() as i32;
+        let screen = at.height;
         let output = at.output.clone();
         match shown {
             Shown::Polkit(dialog) => {
@@ -893,11 +894,25 @@ impl Auth {
                 );
             }
         }
+        // As large as the text size, or as fits the screen's height (#942);
+        // its place then in its own pixels, inside the screen.
+        let fit = crate::layer::Fit {
+            need: (0.0, size.1 as f32 + 2.0 * EDGE),
+            screen: Some((0.0, screen as f32)),
+        };
+        let k = crate::layer::fitting(fit.need, (0.0, screen as f32));
+        let height = f64::from(crate::layer::from_screen_at(screen, k));
+        let top = (height / 2.0 - AUTH_TOP)
+            .min(height - EDGE_F64 - f64::from(size.1))
+            .max(EDGE_F64)
+            .round() as i32;
+        tracing::debug!(zoom = k, top, "the dialog's place");
         vec![Effect::Auth {
             id,
             output,
             size,
             top,
+            fit,
         }]
     }
 

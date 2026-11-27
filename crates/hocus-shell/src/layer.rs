@@ -16,6 +16,13 @@
 //! What they asked is kept, to be asked again at a new text size
 //! ([`text_scale`]).
 //!
+//! A surface that could not show whole on its screen at the text size
+//! (the emoji picker, the actions palette, the authentication dialog, the
+//! lock) says what it needs of its screen ([`Fit`]): it is drawn as large
+//! as the text size or, where that does not fit, just as large as fits
+//! ([`fitting`]; decided by the maintainer 2026-11-27, #942). The text
+//! stays as large as can be, nothing is cut.
+//!
 //! What the compositor says of the screen (a screen's size, a window's or
 //! a caret's place) is in its pixels: a surface placed by it takes it in
 //! its own first ([`from_screen`]), so that its margins, multiplied back
@@ -53,6 +60,64 @@ struct Asked {
     size: LayerSize,
     margin: Option<Margin>,
     input: Option<Vec<Rectangle>>,
+    /// What it needs of its screen, if it could not show whole there.
+    fit: Option<Fit>,
+}
+
+impl Asked {
+    /// How many times larger than it says it it is drawn at `text`.
+    fn zoom(&self, text: TextScale) -> f64 {
+        fit_at(text, self.fit)
+    }
+}
+
+/// What a surface needs of its screen to show whole, and the screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fit {
+    /// Its size at 100 % with the room it keeps from the screen's edges,
+    /// the mockups' pixels (0: that axis does not matter, nor a screen's
+    /// axis of 0, not known).
+    pub need: (f32, f32),
+    /// Its screen's size, in the compositor's pixels; a surface as large
+    /// as its screen learns it as it opens ([`sized`]).
+    pub screen: Option<(f32, f32)>,
+}
+
+/// How many times larger than it says it a surface needing `fit` is
+/// drawn at `text`: the text size, or just as large as fits its screen,
+/// never smaller than 100 % (nor than the text size below it).
+fn fit_at(text: TextScale, fit: Option<Fit>) -> f64 {
+    let k = text.factor();
+    let Some(Fit {
+        need,
+        screen: Some(screen),
+    }) = fit
+    else {
+        return k;
+    };
+    let room = |need: f32, screen: f32| {
+        if need > 0.0 && screen > 0.0 {
+            f64::from(screen) / f64::from(need)
+        } else {
+            f64::INFINITY
+        }
+    };
+    let fits = room(need.0, screen.0).min(room(need.1, screen.1));
+    k.min(fits.max(k.min(1.0)))
+}
+
+/// How many times larger than it says it a surface that needs `need` on
+/// a screen `screen` large (the compositor's pixels) is drawn: what it
+/// places itself with ([`from_screen_at`]) before it opens
+/// ([`open_fitted`]).
+pub fn fitting(need: (f32, f32), screen: (f32, f32)) -> f64 {
+    fit_at(
+        text(),
+        Some(Fit {
+            need,
+            screen: Some(screen),
+        }),
+    )
 }
 
 /// The surfaces open.
@@ -98,20 +163,28 @@ pub fn text_factor() -> f32 {
 }
 
 /// How many times larger than it says it surface `id` is drawn: the text
-/// size if it follows it, else 1. iced's scale factor for it.
+/// size if it follows it (less if that does not fit its screen), else 1.
+/// iced's scale factor for it.
 pub fn zoom(id: window::Id) -> f32 {
-    if placed(|placed| placed.get(&id).is_some_and(|p| p.zoomed.is_some())) {
-        text().factor() as f32
-    } else {
-        1.0
-    }
+    let text = text();
+    placed(|placed| {
+        placed
+            .get(&id)
+            .and_then(|p| p.zoomed.as_ref())
+            .map_or(1.0, |asked| asked.zoom(text) as f32)
+    })
 }
 
-fn scaled_size(size: LayerSize, text: TextScale) -> LayerSize {
+/// `px` `k` times as long, in whole pixels.
+fn whole(px: i32, k: f64) -> i32 {
+    (f64::from(px) * k).round() as i32
+}
+
+fn scaled_size(size: LayerSize, k: f64) -> LayerSize {
     let extent = |extent: Extent| match extent {
         Extent::Exact(px) => {
             let px = i32::try_from(px.get()).unwrap_or(i32::MAX);
-            Extent::try_px(text.whole(px).max(1).unsigned_abs()).unwrap_or(Extent::Fill)
+            Extent::try_px(whole(px, k).max(1).unsigned_abs()).unwrap_or(Extent::Fill)
         }
         Extent::Fill => Extent::Fill,
     };
@@ -121,17 +194,17 @@ fn scaled_size(size: LayerSize, text: TextScale) -> LayerSize {
     }
 }
 
-fn scaled_margin(margin: Margin, text: TextScale) -> Margin {
+fn scaled_margin(margin: Margin, k: f64) -> Margin {
     Margin {
-        top: text.whole(margin.top),
-        right: text.whole(margin.right),
-        bottom: text.whole(margin.bottom),
-        left: text.whole(margin.left),
+        top: whole(margin.top, k),
+        right: whole(margin.right, k),
+        bottom: whole(margin.bottom, k),
+        left: whole(margin.left, k),
     }
 }
 
-fn scaled_rect(r: Rectangle, text: TextScale) -> Rectangle {
-    let k = text.factor() as f32;
+fn scaled_rect(r: Rectangle, k: f64) -> Rectangle {
+    let k = k as f32;
     Rectangle {
         x: r.x * k,
         y: r.y * k,
@@ -150,13 +223,23 @@ pub fn bar_room(form: hocus_link::Form) -> i32 {
 /// A length on the screen, in the compositor's pixels, in the pixels a
 /// surface that follows the text size lays itself out in.
 pub fn from_screen(px: i32) -> i32 {
-    (f64::from(px) / text().factor()).round() as i32
+    from_screen_at(px, text().factor())
+}
+
+/// The same for a surface drawn `k` times larger than it says
+/// ([`fitting`]).
+pub fn from_screen_at(px: i32, k: f64) -> i32 {
+    (f64::from(px) / k).round() as i32
 }
 
 /// A rectangle on the screen, in the compositor's pixels, in the pixels a
 /// surface that follows the text size lays itself out in.
 pub fn rect_from_screen(r: hocus_link::Rect) -> hocus_link::Rect {
-    let k = text().factor();
+    rect_from_screen_at(r, text().factor())
+}
+
+/// The same for a surface drawn `k` times larger than it says.
+pub fn rect_from_screen_at(r: hocus_link::Rect, k: f64) -> hocus_link::Rect {
     let x = (f64::from(r.x) / k).round() as i32;
     let y = (f64::from(r.y) / k).round() as i32;
     hocus_link::Rect {
@@ -171,7 +254,7 @@ pub fn rect_from_screen(r: hocus_link::Rect) -> hocus_link::Rect {
 /// pixels: what the shell tells it of where things are on its surfaces
 /// (the bar's pieces, the sharing's thumbnails).
 pub fn told(r: Rectangle) -> [i32; 4] {
-    let r = scaled_rect(r, text());
+    let r = scaled_rect(r, text().factor());
     [
         r.x.round() as i32,
         r.y.round() as i32,
@@ -196,19 +279,20 @@ pub fn text_scale(to: TextScale) -> Vec<Message> {
     });
     let mut messages = Vec::new();
     for (id, anchor, asked) in asked {
+        let k = asked.zoom(to);
         messages.push(Message::LayoutChange {
             id,
             anchor,
-            size: scaled_size(asked.size, to),
+            size: scaled_size(asked.size, k),
         });
         if let Some(margin) = asked.margin {
             messages.push(Message::MarginChange {
                 id,
-                margin: scaled_margin(margin, to),
+                margin: scaled_margin(margin, k),
             });
         }
         if let Some(rects) = asked.input {
-            messages.push(region(id, rects.into_iter().map(|r| scaled_rect(r, to))));
+            messages.push(region(id, rects.into_iter().map(|r| scaled_rect(r, k))));
         }
     }
     messages
@@ -216,7 +300,17 @@ pub fn text_scale(to: TextScale) -> Vec<Message> {
 
 /// Opens surface `id` with `settings`, at the text size if its namespace
 /// follows it.
-pub fn open(id: window::Id, mut settings: NewLayerShellSettings) -> Message {
+pub fn open(id: window::Id, settings: NewLayerShellSettings) -> Message {
+    open_with(id, settings, None)
+}
+
+/// Opens surface `id` with `settings`, at the text size or just as large
+/// as fits its screen ([`fitting`]): `fit` says what it needs of it.
+pub fn open_fitted(id: window::Id, settings: NewLayerShellSettings, fit: Fit) -> Message {
+    open_with(id, settings, Some(fit))
+}
+
+fn open_with(id: window::Id, mut settings: NewLayerShellSettings, fit: Option<Fit>) -> Message {
     let follows = settings
         .namespace
         .as_deref()
@@ -225,15 +319,53 @@ pub fn open(id: window::Id, mut settings: NewLayerShellSettings) -> Message {
         size: settings.size,
         margin: settings.margin,
         input: None,
+        fit,
     });
-    if follows {
-        let text = text();
-        settings.size = scaled_size(settings.size, text);
-        settings.margin = settings.margin.map(|m| scaled_margin(m, text));
+    if let Some(asked) = &zoomed {
+        let k = asked.zoom(text());
+        if fit.is_some() {
+            tracing::debug!(
+                namespace = settings.namespace.as_deref().unwrap_or_default(),
+                zoom = k,
+                "a surface fitted to its screen"
+            );
+        }
+        settings.size = scaled_size(settings.size, k);
+        settings.margin = settings.margin.map(|m| scaled_margin(m, k));
     }
     let anchor = settings.anchor;
     placed(|placed| placed.insert(id, Placed { anchor, zoomed }));
     Message::NewLayerShell { settings, id }
+}
+
+/// Surface `id` is `size` large in the compositor's pixels, as iced says
+/// when it opens and resizes: one as large as its screen that needs to
+/// fit it learns the screen's size, and is drawn as large as fits.
+/// Whether its scale changed: iced takes it after an update.
+pub fn sized(id: window::Id, size: iced::Size) -> bool {
+    let text = text();
+    placed(|placed| {
+        let Some(asked) = placed.get_mut(&id).and_then(|p| p.zoomed.as_mut()) else {
+            return false;
+        };
+        let before = asked.zoom(text);
+        let Some(fit) = asked.fit.as_mut() else {
+            return false;
+        };
+        let filled =
+            matches!(asked.size.width, Extent::Fill) && matches!(asked.size.height, Extent::Fill);
+        let screen = (size.width, size.height);
+        if !filled || fit.screen == Some(screen) || screen.0 < 1.0 || screen.1 < 1.0 {
+            return false;
+        }
+        fit.screen = Some(screen);
+        tracing::debug!(
+            screen = ?screen,
+            zoom = fit_at(text, Some(*fit)),
+            "a surface fitted to its screen"
+        );
+        asked.zoom(text) != before
+    })
 }
 
 /// Surface `id` to `size`, against the anchor it opened with; nothing if
@@ -246,7 +378,7 @@ pub fn resize(id: window::Id, to: (u32, u32)) -> Option<Message> {
         let size = match p.zoomed.as_mut() {
             Some(zoomed) => {
                 zoomed.size = asked;
-                scaled_size(asked, text)
+                scaled_size(asked, zoomed.zoom(text))
             }
             None => asked,
         };
@@ -267,7 +399,7 @@ pub fn moved(id: window::Id, to: (i32, i32, i32, i32)) -> Message {
         |placed| match placed.get_mut(&id).and_then(|p| p.zoomed.as_mut()) {
             Some(zoomed) => {
                 zoomed.margin = Some(asked);
-                scaled_margin(asked, text)
+                scaled_margin(asked, zoomed.zoom(text))
             }
             None => asked,
         },
@@ -291,19 +423,18 @@ pub const ALL: Rectangle = Rectangle {
 pub fn input(id: window::Id, rects: impl IntoIterator<Item = Rectangle>) -> Message {
     let rects: Vec<Rectangle> = rects.into_iter().collect();
     let text = text();
-    let follows = placed(
+    let zoom = placed(
         |placed| match placed.get_mut(&id).and_then(|p| p.zoomed.as_mut()) {
             Some(zoomed) => {
                 zoomed.input = Some(rects.clone());
-                true
+                Some(zoomed.zoom(text))
             }
-            None => false,
+            None => None,
         },
     );
-    if follows {
-        region(id, rects.into_iter().map(|r| scaled_rect(r, text)))
-    } else {
-        region(id, rects)
+    match zoom {
+        Some(k) => region(id, rects.into_iter().map(|r| scaled_rect(r, k))),
+        None => region(id, rects),
     }
 }
 
@@ -468,5 +599,36 @@ mod tests {
         assert_eq!(settings.size, size((600, 450)));
         // The bar's room, in the same pixels: the full bar and its edge.
         assert_eq!(bar_room(hocus_link::Form::Full), 196 + hocus_link::EDGE);
+    }
+
+    /// #942, decided 2026-11-27: a surface that does not fit its screen at
+    /// the text size is drawn just as large as fits; one as large as its
+    /// screen learns it as it opens; never under 100 %.
+    #[test]
+    fn a_surface_too_large_for_its_screen_is_drawn_as_large_as_fits() {
+        let _ = text_scale(TextScale(150));
+        assert!((fitting((520.0, 622.0), (2560.0, 1440.0)) - 1.5).abs() < 1e-9);
+        let fits = fitting((520.0, 622.0), (1440.0, 900.0));
+        assert!((fits - 900.0 / 622.0).abs() < 1e-9, "{fits}");
+        assert!((fitting((520.0, 1200.0), (1440.0, 900.0)) - 1.0).abs() < 1e-9);
+        assert!((fitting((0.0, 622.0), (0.0, 0.0)) - 1.5).abs() < 1e-9);
+        // As large as its screen, its screen learnt as it opens.
+        let id = window::Id::unique();
+        let settings = NewLayerShellSettings {
+            size: size((0, 0)),
+            namespace: Some(hocus_link::LOCK_NAMESPACE.to_owned()),
+            ..NewLayerShellSettings::default()
+        };
+        let fit = Fit {
+            need: (868.0, 708.0),
+            screen: None,
+        };
+        let _ = open_fitted(id, settings, fit);
+        assert!((zoom(id) - 1.5).abs() < 1e-6);
+        sized(id, iced::Size::new(1440.0, 900.0));
+        assert!((f64::from(zoom(id)) - 900.0 / 708.0).abs() < 1e-6);
+        // A smaller text size than fits: the text size.
+        let _ = text_scale(TextScale(120));
+        assert!((zoom(id) - 1.2).abs() < 1e-6);
     }
 }

@@ -224,9 +224,19 @@ fn list_height(rows: &[Row]) -> f32 {
 /// The surface's size for `rows`, `width` wide: as tall as the whole rows
 /// shown from the first, nine rows' room at most.
 pub fn size(rows: &[Row], width: f32) -> (u32, u32) {
-    let list = list_height(rows);
-    let height = IN + FIELD + LIST_GAP + list + FOOT_GAP + 1.0 + FOOT_GAP + FOOT_LINE + 2.0 + IN;
-    (width.round() as u32, height.ceil() as u32)
+    (
+        width.round() as u32,
+        height_with(list_height(rows)).ceil() as u32,
+    )
+}
+
+/// Its height with nine rows' room: the most it takes.
+pub fn most_height() -> f32 {
+    height_with(MOST_LIST)
+}
+
+fn height_with(list: f32) -> f32 {
+    IN + FIELD + LIST_GAP + list + FOOT_GAP + 1.0 + FOOT_GAP + FOOT_LINE + 2.0 + IN
 }
 
 /// Where row `at` is in the list, and how tall, with its heading when it

@@ -590,21 +590,10 @@ impl Picker {
             return effects;
         }
         let surface = window::Id::unique();
-        // The screen and the caret in the picker's own pixels, at the text
-        // size.
-        let screen = (
-            crate::layer::from_screen(screen.0) as f32,
-            crate::layer::from_screen(screen.1) as f32,
-        );
-        let at = match at {
-            EmojiAt::Caret(r) => EmojiAt::Caret(crate::layer::rect_from_screen(r)),
-            EmojiAt::Window(r) => EmojiAt::Window(crate::layer::rect_from_screen(r)),
-            EmojiAt::Screen => EmojiAt::Screen,
-        };
         let mut open = Open {
             surface,
             at,
-            screen,
+            screen: (0.0, 0.0),
             place: (0, 0),
             query: Entry::new(field::Kind::Line, QUERY_MOST),
             grid: Grid::default(),
@@ -617,13 +606,30 @@ impl Picker {
         };
         open.regrid();
         let size = open.size();
-        open.place = place(at, size, screen);
-        tracing::debug!(output, ?at, place = ?open.place, "the emoji picker opens");
+        // As large as the text size, or as fits the screen with its edges
+        // (#942); the screen and the caret then in its own pixels.
+        let fit = crate::layer::Fit {
+            need: (size.0 as f32 + 2.0 * EDGE, size.1 as f32 + 2.0 * EDGE),
+            screen: Some((screen.0 as f32, screen.1 as f32)),
+        };
+        let k = crate::layer::fitting(fit.need, (screen.0 as f32, screen.1 as f32));
+        open.screen = (
+            crate::layer::from_screen_at(screen.0, k) as f32,
+            crate::layer::from_screen_at(screen.1, k) as f32,
+        );
+        open.at = match at {
+            EmojiAt::Caret(r) => EmojiAt::Caret(crate::layer::rect_from_screen_at(r, k)),
+            EmojiAt::Window(r) => EmojiAt::Window(crate::layer::rect_from_screen_at(r, k)),
+            EmojiAt::Screen => EmojiAt::Screen,
+        };
+        open.place = place(open.at, size, open.screen);
+        tracing::debug!(output, at = ?open.at, place = ?open.place, zoom = k, "the emoji picker opens");
         effects.push(Effect::Emoji {
             id: surface,
             output,
             size,
             margin: (open.place.1, 0, 0, open.place.0),
+            fit,
         });
         self.phase = Phase::Open(Box::new(open));
         // One at a time: the bar's popover, the launcher and the actions

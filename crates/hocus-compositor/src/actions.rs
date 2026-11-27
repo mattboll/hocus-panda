@@ -243,6 +243,10 @@ impl State {
             output: output.name(),
             scale: self.bar_scale(&output.name()),
             area,
+            height: self
+                .space
+                .output_geometry(output)
+                .map_or(0, |screen| screen.size.h),
             window: window.map(|w| w.0),
             title: match window {
                 Some(id) => crate::windows::title_of(self, id),

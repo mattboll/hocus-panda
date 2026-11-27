@@ -990,6 +990,79 @@ fn the_portal_tells_applications_the_text_size() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// #942, decided by the maintainer 2026-11-27: on a 1440 × 900 screen at
+/// 150 %, the emoji picker and the lock do not fit at the text size: each
+/// is drawn just as large as fits its screen, below 150 %, the picker
+/// taking its height less its edges, the lock its height for twice the
+/// clock's place above the middle.
+#[test]
+fn at_150_on_a_short_screen_the_picker_and_the_lock_fit_it() -> anyhow::Result<()> {
+    const KEY_DOT: u32 = 52;
+    let Some(mut bed) = Bed::start_on(
+        &format!("{FILE}\n[appearance]\ntext-scale = 1.5\n"),
+        &["1440x900"],
+    )?
+    else {
+        return Ok(());
+    };
+    let zoom_of = |line: &str| -> Option<f64> {
+        line.split("zoom=")
+            .nth(1)?
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()
+    };
+    common::chord(&mut bed.hp, &[common::KEY_LEFTMETA, KEY_DOT]);
+    let shown = bed.hp.dispatch_until(WAIT, |hp| {
+        !hp.drawn_layers(hocus_link::EMOJI_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(shown, "no picker");
+    let picker = bed.hp.drawn_layers(hocus_link::EMOJI_NAMESPACE)[0].1;
+    let opened = plain(&bed.log)
+        .lines()
+        .rfind(|l| l.contains("the emoji picker opens"))
+        .and_then(zoom_of)
+        .ok_or_else(|| anyhow::anyhow!("no zoom said"))?;
+    assert!(opened < 1.5, "the picker at {opened}");
+    assert!(
+        picker.y >= 0 && picker.y + picker.height <= 900,
+        "{picker:?}"
+    );
+    let edges = (2.0 * 8.0 * opened).round() as i32;
+    assert!(
+        (picker.height - (900 - edges)).abs() <= 2,
+        "{picker:?} at {opened}: as tall as fits"
+    );
+    bed.hp.key(common::KEY_ESC, true);
+    bed.hp.key(common::KEY_ESC, false);
+    let gone = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.drawn_layers(hocus_link::EMOJI_NAMESPACE).is_empty()
+    })?;
+    anyhow::ensure!(gone, "the picker stays");
+    bed.hp.lock();
+    let log = bed.log.clone();
+    let fitted = |log: &Path| {
+        plain(log)
+            .lines()
+            .rfind(|l| l.contains("a surface fitted to its screen") && l.contains("1440.0, 900.0"))
+            .and_then(zoom_of)
+    };
+    let told = bed.hp.dispatch_until(WAIT, |hp| {
+        hp.lock_drawn_on().len() == 1 && fitted(&log).is_some()
+    })?;
+    anyhow::ensure!(told, "the lock was never fitted");
+    let lock = fitted(&log).unwrap_or_default();
+    // Its need: twice the clock's top above the middle, 330, and 24 more.
+    let fits = 900.0 / (2.0 * (330.0 + 24.0));
+    assert!(lock < 1.5, "the lock at {lock}");
+    assert!(
+        (lock - fits).abs() < 1e-3,
+        "the lock at {lock}, {fits} fits"
+    );
+    Ok(())
+}
+
 /// #942: GTK applications are told the text size in GNOME's own settings
 /// too, written by the session's program (a fake of the test's, which
 /// keeps what it is asked; never the machine's dconf): as the compositor

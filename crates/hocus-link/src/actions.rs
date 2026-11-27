@@ -1271,6 +1271,9 @@ pub struct ActionsShown {
     /// The screen's work area across: its left from the screen's and its
     /// width (logical pixels), the palette centred in it.
     pub area: (i32, i32),
+    /// The screen's height (logical pixels): the palette is drawn as
+    /// large as the text size, or as fits it (#942).
+    pub height: i32,
     /// The switches on.
     pub on: Vec<String>,
     /// The actions that cannot run now, and why.

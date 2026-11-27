@@ -220,6 +220,8 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
         margin: (i32, i32, i32, i32),
+        /// What it needs of its screen to show whole (#942).
+        fit: crate::layer::Fit,
     },
     /// The emoji picker's surface on `output` (5.7): `size`, its margins
     /// from the screen's top left corner (top, right, bottom, left),
@@ -229,6 +231,8 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
         margin: (i32, i32, i32, i32),
+        /// What it needs of its screen to show whole (#942).
+        fit: crate::layer::Fit,
     },
     /// A project's form or card opens (docs/design/projects.md): a surface
     /// `size` large, of `namespace`, on `output`, its margins from the
@@ -273,6 +277,8 @@ pub enum Effect {
         output: String,
         size: (u32, u32),
         top: i32,
+        /// What it needs of its screen to show whole (#942).
+        fit: crate::layer::Fit,
     },
     /// The capture's thumbnail on `output` (5.9), `size` large, its
     /// margins from the screen's bottom right corner (top, right, bottom,
@@ -297,6 +303,8 @@ pub enum Effect {
     LockSurface {
         id: window::Id,
         output: String,
+        /// What it needs of its screen to show whole (#942).
+        fit: crate::layer::Fit,
     },
     /// The curtain's pill on `output` (7.2): 300 × 64, centred across it,
     /// `top` from its top, over everything, taking neither the pointer nor

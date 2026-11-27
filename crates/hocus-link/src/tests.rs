@@ -752,6 +752,7 @@ fn to_shell() -> Vec<ToShell> {
             window: Some(7),
             title: "kitty · herdr".into(),
             area: (8, 3360),
+            height: 1890,
             on: vec!["above".into(), "screen-reader".into()],
             inert: vec![
                 ("move-to-screen-left".into(), actions::Inert::OneScreen),

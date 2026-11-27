@@ -1203,6 +1203,19 @@ window is the preview.
   their corners, shadows and motion at it (`State::zoom_of`), and its own
   words at it too: every desktop's labels (#944), the capture's size
   over its area and its countdown.
+- **A surface too large for its screen** (#942, decided by the
+  maintainer 2026-11-27): one that would not show whole on its screen at
+  the text size is drawn just as large as fits, never under 100 %: the
+  text stays as large as can be, nothing is cut. One shared rule
+  (`layer::fitting`, `layer::Fit`): the surface says what it needs of its
+  screen at 100 % (its size with its edges), and the screen's size comes
+  with what opens it, or, for a surface as large as its screen, as it
+  opens. So are the emoji picker (its height with 8 px edges), the actions
+  palette (64 px under the top, nine rows, 16 px under), the
+  authentication dialog (its height with 8 px edges, inside the screen)
+  and the lock (twice the clock's 330 px above the middle, and 24 more;
+  the form and the pandas across): on a 1440 × 900 screen at 150 %, the
+  picker is drawn at 145 %, the lock at 127 %.
 - **GTK applications** (#942): besides the portal, which Flatpak's read,
   the session writes GNOME's `text-scaling-factor` in its own dconf,
   through `gsettings` on a thread of its own (`appearance/gnome.rs`), as

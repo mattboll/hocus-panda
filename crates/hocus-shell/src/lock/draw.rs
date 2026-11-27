@@ -107,6 +107,14 @@ const PANDAS_LEFT: f32 = 34.0;
 const PANDAS_BOTTOM: f32 = 26.0;
 const PANDA_NEAR: f32 = 132.0;
 const PANDA_FAR: f32 = 108.0;
+/// What the lock needs of its screen to show whole (#942): the clock's top
+/// is the farthest from the middle, with room above it, and as far
+/// below; the form across, the pandas on one side and as much on the
+/// other.
+pub const NEED: (f32, f32) = (
+    FORM_WIDTH + 2.0 * (PANDAS_LEFT + PANDA_NEAR + PANDA_FAR),
+    2.0 * (CLOCK_ABOVE + 24.0),
+);
 /// The agents' pill: its panda 34 px, 6 px in.
 const AGENTS_PANDA: f32 = 34.0;
 const AGENTS_IN: f32 = 6.0;

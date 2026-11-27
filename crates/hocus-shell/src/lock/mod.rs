@@ -202,7 +202,15 @@ fn surfaces(lock: &mut Lock, screens: &Known) -> Vec<Effect> {
         let id = window::Id::unique();
         tracing::debug!(output = name, "a lock surface");
         lock.surfaces.insert(name.clone(), id);
-        effects.push(Effect::LockSurface { id, output: name });
+        effects.push(Effect::LockSurface {
+            id,
+            output: name,
+            // Its screen's size comes as it opens (`layer::sized`).
+            fit: crate::layer::Fit {
+                need: draw::NEED,
+                screen: None,
+            },
+        });
     }
     effects
 }

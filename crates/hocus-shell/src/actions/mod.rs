@@ -528,10 +528,22 @@ impl Palette {
             return effects;
         }
         let surface = window::Id::unique();
-        // The work area, in the palette's own pixels at the text size.
+        // As large as the text size, or as fits the screen's height with
+        // nine rows (#942); the work area then in its own pixels.
+        let screen = (0.0, shown.height as f32);
+        let fit = crate::layer::Fit {
+            need: (
+                0.0,
+                hocus_link::ACTIONS_TOP as f32
+                    + view::most_height()
+                    + hocus_link::ACTIONS_TOP as f32 / 4.0,
+            ),
+            screen: Some(screen),
+        };
+        let k = crate::layer::fitting(fit.need, screen);
         let (area_x, area_width) = (
-            crate::layer::from_screen(shown.area.0),
-            crate::layer::from_screen(shown.area.1),
+            crate::layer::from_screen_at(shown.area.0, k),
+            crate::layer::from_screen_at(shown.area.1, k),
         );
         let width = view::width(area_width as f32);
         let mut open = Open {
@@ -555,6 +567,7 @@ impl Palette {
             output = open.shown.output,
             window = open.shown.window,
             place = ?open.place,
+            zoom = k,
             "the actions palette opens"
         );
         effects.push(Effect::Actions {
@@ -562,6 +575,7 @@ impl Palette {
             output: open.shown.output.clone(),
             size: open.size,
             margin: (open.place.0, 0, 0, open.place.1),
+            fit,
         });
         self.phase = Phase::Open(Box::new(open));
         // One at a time: the bar's popover, the launcher and the emoji
@@ -963,6 +977,7 @@ mod tests {
             window: Some(7),
             title: "kitty".into(),
             area: (0, 1920),
+            height: 1080,
             on: Vec::new(),
             inert: Vec::new(),
             shortcuts: Vec::new(),
