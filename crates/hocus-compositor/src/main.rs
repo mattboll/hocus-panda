@@ -219,6 +219,11 @@ fn main() -> ExitCode {
             .and_then(|exe| hocus_compositor::away::charge::Helper::packaged(&exe, supplies)),
         None => None,
     };
+    // GTK applications' text size (#942): GNOME's setting, in the
+    // session's own dconf, only when this is the session.
+    if matches!(backend, BackendArg::Tty) {
+        config.gnome_settings = Some(PathBuf::from("gsettings"));
+    }
     // The Hocuspanda microphone (#619, lot 5): the same.
     if args.voice || matches!(backend, BackendArg::Tty) {
         config.voice_program = Some(beside("hocus-voice"));

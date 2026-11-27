@@ -305,6 +305,8 @@ fn start(options: Options) -> anyhow::Result<Started> {
         (None, _) => None,
     });
     state.start_sharing();
+    // GTK applications' text size, the session's only (#942).
+    state.gnome_text_scale();
     state.start_idle();
     state.start_away(system_bus);
     agents::start(&event_loop.handle(), &mut state)?;

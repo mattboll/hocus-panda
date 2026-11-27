@@ -124,7 +124,9 @@ depends=$(sed -n 's/^shlibs:Depends=//p' "$work/shlibs")
 # (without it, the charge is not limited);
 # v4l2loopback's module, built by DKMS, which the Hocuspanda camera writes
 # to for the applications that read only /dev/video* (without it, the
-# camera is on PipeWire only). Depends:
+# camera is on PipeWire only); gsettings, GNOME's interface schemas and
+# dconf's backend, through which the session gives GTK applications the
+# text size (without them, only through the portal). Depends:
 # xdg-desktop-portal, through which applications ask to share the screen.
 cat > "$root/DEBIAN/control" <<CONTROL
 Package: hocuspanda
@@ -142,7 +144,8 @@ Recommends: libegl-mesa0, libgl1-mesa-dri, mesa-vulkan-drivers, xwayland,
  ffmpeg, va-driver-all | va-driver,
  gnome-online-accounts,
  polkitd, pkexec | policykit-1,
- v4l2loopback-dkms
+ v4l2loopback-dkms,
+ libglib2.0-bin, gsettings-desktop-schemas, dconf-gsettings-backend
 Section: x11
 Priority: optional
 Homepage: https://github.com/mattboll/hocus-panda

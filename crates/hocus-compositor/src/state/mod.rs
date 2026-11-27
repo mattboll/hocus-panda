@@ -157,6 +157,8 @@ pub struct State {
     pub holidays: crate::holidays::Holidays,
     /// The screen reader started with the session (#734).
     pub screen_reader: crate::screen_reader::ScreenReader,
+    /// GNOME's text size, as last written for GTK applications (#942).
+    pub gnome_text: crate::appearance::gnome::GnomeText,
     /// The overview while it shows (8.5 A), and what draws it.
     pub overview: Option<crate::overview::Overview>,
     pub overview_paint: crate::overview_draw::OverviewPaint,
@@ -369,6 +371,7 @@ impl State {
             night: crate::night_light::Night::default(),
             holidays: crate::holidays::Holidays::default(),
             screen_reader: crate::screen_reader::ScreenReader::default(),
+            gnome_text: crate::appearance::gnome::GnomeText::default(),
             told_window_states: None,
             overlay: Overlay::new(),
             programs: Programs::default(),

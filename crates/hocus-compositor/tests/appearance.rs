@@ -8,8 +8,9 @@
 //! One test per decision: switching the file to light draws the bar and
 //! an open popover in light colours, live; the portal answers
 //! `color-scheme` and signals its change, and GNOME's
-//! `text-scaling-factor` (#928); the text size widens the bar and its
-//! popovers, live; the accent changes the bar's
+//! `text-scaling-factor` (#928), and GNOME's own settings are written it
+//! for GTK applications (#942, a fake `gsettings`); the text size widens
+//! the bar and its popovers, live; the accent changes the bar's
 //! accent colour; the Settings window draws in the theme and follows the
 //! file; and once the switch is drawn, nothing commits at rest. Givre
 //! (#740): the bar in its night blue, its accent, nothing at rest; and a
@@ -986,6 +987,63 @@ fn the_portal_tells_applications_the_text_size() -> anyhow::Result<()> {
         anyhow::Ok(reply.body().deserialize()?)
     })?;
     assert!(f64::try_from(read).is_ok_and(|f| (f - 1.3).abs() < 1e-9));
+    Ok(())
+}
+
+/// #942: GTK applications are told the text size in GNOME's own settings
+/// too, written by the session's program (a fake of the test's, which
+/// keeps what it is asked; never the machine's dconf): as the compositor
+/// starts, then each time the file changes it, never for another change.
+#[test]
+fn gtk_applications_are_told_the_text_size_in_gnomes_settings() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, FILE)?;
+    let asked = dir.path().join("asked");
+    let program = dir.path().join("gsettings");
+    std::fs::write(
+        &program,
+        format!("#!/bin/sh\necho \"$*\" >> '{}'\n", asked.display()),
+    )?;
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))?;
+    let mut config = Config::load(&file);
+    config.keyboard.layouts = vec!["us".to_owned()];
+    config.file = Some(file.clone());
+    config.gnome_settings = Some(program);
+    let mut hp = Headless::start_with(
+        HeadlessConfig {
+            outputs: vec!["1920x1080".parse()?],
+            renderer: RendererChoice::Pixman,
+            render_node: None,
+        },
+        config,
+    )?;
+    let lines = |asked: &Path| {
+        std::fs::read_to_string(asked)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let set = |value: &str| format!("set {GNOME} text-scaling-factor {value}");
+    let started = hp.dispatch_until(WAIT, |_| lines(&asked).len() == 1)?;
+    anyhow::ensure!(started, "asked {:?} as it started", lines(&asked));
+    assert_eq!(lines(&asked), [set("1.00")]);
+    std::fs::write(&file, format!("{FILE}\n[appearance]\ntext-scale = 1.3\n"))?;
+    let changed = hp.dispatch_until(WAIT, |_| lines(&asked).len() == 2)?;
+    anyhow::ensure!(changed, "asked {:?} once changed", lines(&asked));
+    assert_eq!(lines(&asked)[1], set("1.30"));
+    // Another change of the file's: nothing more asked.
+    std::fs::write(
+        &file,
+        format!("{FILE}\n[appearance]\ntext-scale = 1.3\ntheme = \"light\"\n"),
+    )?;
+    let read = hp.dispatch_until(WAIT, |hp| {
+        hp.state().config.appearance.theme == hocus_link::theme::Scheme::Light
+    })?;
+    anyhow::ensure!(read, "the theme was never read");
+    common::wait(&mut hp, Duration::from_millis(300))?;
+    assert_eq!(lines(&asked).len(), 2, "{:?}", lines(&asked));
     Ok(())
 }
 
