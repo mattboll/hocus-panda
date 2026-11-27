@@ -46,10 +46,9 @@ retries = 1
 # test fails without the programs it needs, so these are left out there,
 # by name, and run where the programs are (the default profile).
 # Installing them on CI takes them out of this list.
-# And two that fail by chance on CI's runners, each until its issue's fix:
-# `day_sources::the_planka_step_takes_a_pasted_token_and_says_a_refused_
-# one_no_server_or_a_board_not_shared` (#968), `day_sources::choose_opens_
-# step_1_beside_the_card_without_online_accounts_google_is_disabled` (#969).
+# And one that fails by chance on CI's runners, until its issue's fix:
+# `day_sources::choose_opens_step_1_beside_the_card_without_online_
+# accounts_google_is_disabled` (#969).
 default-filter = """
 not (
     (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
@@ -60,7 +59,6 @@ not (
         | test(=memory::x11_windows_gone_leave_no_surface_behind)
         | test(=unplug_clients::kitty_keeps_running_on_an_unplugged_screen)
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
-        | test(=day_sources::the_planka_step_takes_a_pasted_token_and_says_a_refused_one_no_server_or_a_board_not_shared)
         | test(=day_sources::choose_opens_step_1_beside_the_card_without_online_accounts_google_is_disabled)
     ))
 )
