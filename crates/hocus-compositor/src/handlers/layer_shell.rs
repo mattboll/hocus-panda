@@ -204,6 +204,12 @@ fn hold_margins(surface: &WlSurface, output: &Output, whole: Option<Size<i32, Lo
 /// higher for a frame (#964). Now the old buffer stays against the edge,
 /// where it was, and the new one takes the new size's place. The client's
 /// own margins come back with its next commit.
+///
+/// For the windows' surface only: it alone keeps that edge as it grows.
+/// The popovers, anchored to the bottom too, keep their top, asking a new
+/// size and a new margin in commits of their own; held against the bottom,
+/// a popover that had not drawn at its new size yet stood off its place
+/// and took clicks there.
 fn by_its_buffer(surface: &WlSurface, output: &Output, whole: Option<Size<i32, Logical>>) {
     let Some(drawn) = with_renderer_surface_state(surface, |s| s.surface_size()).flatten() else {
         return;
@@ -351,7 +357,9 @@ pub fn handle_commit(state: &mut State, surface: &WlSurface) {
         }
         let whole = state.space.output_geometry(&output).map(|g| g.size);
         hold_margins(surface, &output, whole);
-        by_its_buffer(surface, &output, whole);
+        if layer.namespace() == hocus_link::WINDOWS_NAMESPACE {
+            by_its_buffer(surface, &output, whole);
+        }
         let before = state.work_area(&output);
         layer_map_for_output(&output).arrange();
         if state.work_area(&output) != before {
