@@ -1672,9 +1672,16 @@ impl State {
     /// judgement already found everything still: nothing moved since.
     /// What moves on some screens alone (`frames.moved_on`) asks for
     /// their frames alone (#826).
+    ///
+    /// The last frame drawn is one screen's: a motion that ended after
+    /// another screen's last frame left that one a step short (a window
+    /// opening still half clear, what it will cover drawn through it).
+    /// Those screens draw once more as the motions end (#949). Judged as
+    /// of now, every screen draws again anyway.
     fn judge_still(&mut self, moving: bool, as_of_frame: bool) {
         let on = std::mem::take(&mut self.frames.moved_on);
         let was_still = self.frames.still;
+        let ended = std::mem::replace(&mut self.frames.moving, moving) && !moving;
         self.frames.still = !moving && on.is_empty() && (as_of_frame || was_still);
         if moving || !(as_of_frame || was_still) {
             self.redraw = true;
@@ -1682,6 +1689,27 @@ impl State {
         for output in on {
             self.redraw_on(output);
         }
+        if ended && as_of_frame {
+            for output in self.drawn_before_the_last() {
+                self.redraw_on(output);
+            }
+        }
+    }
+
+    /// The screens whose last frame came before the last frame drawn, in
+    /// the second before it: drawn while the motions moved, not since.
+    /// One not drawn for longer had nothing moving on it.
+    fn drawn_before_the_last(&self) -> Vec<Output> {
+        let Some(last) = self.frames.drawn_at.get() else {
+            return Vec::new();
+        };
+        let mut drawn_on = self.frames.drawn_on.borrow_mut();
+        drawn_on.retain(|(output, _)| self.is_plugged(output));
+        drawn_on
+            .iter()
+            .filter(|(_, at)| *at < last && last - *at < Duration::from_secs(1))
+            .map(|(output, _)| output.clone())
+            .collect()
     }
 
     /// A turn of the loop at `at`, nothing drawn for it: the effects'

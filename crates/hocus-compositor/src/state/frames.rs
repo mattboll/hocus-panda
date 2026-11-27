@@ -37,9 +37,15 @@ pub struct Frames {
     /// When the last frame was drawn: motions are judged as of then (see
     /// `tick`). Set while drawing, which borrows the state shared.
     pub drawn_at: Cell<Option<Duration>>,
+    /// When each screen's last frame was drawn, in the motions' time. The
+    /// screens draw one after the other, each at its own time: the last
+    /// frame drawn is one screen's, and another's may be older (#949).
+    pub drawn_on: RefCell<Vec<(smithay::output::Output, Duration)>>,
     /// Nothing moved as of the last frame drawn, as `tick` judged it then:
     /// that frame shows every motion at its end (the tests' `at_rest`).
     pub still: bool,
+    /// Something drawn on every screen moved, as `tick` judged it last.
+    pub moving: bool,
     /// The screens a motion drawn on them alone moved on this turn (the
     /// garland across a screen's top, the halo and the peek by the bar):
     /// only they draw again for it, not every screen (#826).
