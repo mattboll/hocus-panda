@@ -1395,8 +1395,11 @@ fn opening_an_application_folds_its_notifications_and_its_bubble_lives_its_time(
     let mut bed = start(&shell, |_, _| {})?;
     // Courriel's window first: its notification is its, not the window's
     // of the process that sends them all (the test's own, which draws
-    // Chat's window too).
+    // Chat's window too). The shell is told of its focus on the link and
+    // of the notifications on the bus: Chat's sent before it knew would
+    // fold as the process's, so the notifications wait for its fold.
     common::open(&mut bed.hp, "org.example.Courriel", (500, 300))?;
+    bed.logged("its notifications seen app=\"org.example.Courriel\"")?;
     for summary in ["Hugo dans #dev", "Inès dans #général"] {
         bed.notify(Notice {
             app: "Chat",
