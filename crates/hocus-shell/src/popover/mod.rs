@@ -1361,6 +1361,17 @@ pub fn with<T>(with: impl FnOnce(&mut Controller) -> T) -> T {
     with(controller.get_or_insert_with(Controller::default))
 }
 
+/// `act` on the controller, the effects it makes [`send`] before the
+/// controller is let go: they reach the stream in the order it made them.
+/// Sent once it is let go, a popover's opening could come behind its
+/// resize, made meanwhile on a worker's thread (Online Accounts answering
+/// as the sources' popover opens, #969): asked of a surface not open yet,
+/// the new size was lost, the new margins kept, and the popover stayed
+/// short and too low.
+fn acting(act: impl FnOnce(&mut Controller) -> Vec<Effect>) {
+    with(|c| send(act(c)));
+}
+
 /// What a surface saw; the effects go to [`effects`]' stream, and so does
 /// a new deadline, which the stream then waits for.
 pub fn event(event: Event) {
@@ -1373,14 +1384,14 @@ pub fn event(event: Event) {
     {
         crate::tasks::pressed_elsewhere();
     }
-    let (effects, moved) = with(|c| {
+    // Sent under the controller, as [`acting`] does.
+    with(|c| {
         let before = c.deadline();
         let effects = c.handle(event, Instant::now());
-        (effects, c.deadline() != before)
+        if !effects.is_empty() || c.deadline() != before {
+            send(effects);
+        }
     });
-    if !effects.is_empty() || moved {
-        send(effects);
-    }
 }
 
 /// A key pressed: the key, the modifiers held, and the text it typed, as
@@ -1608,7 +1619,7 @@ pub fn send(effects: Vec<Effect>) {
 /// [`ToShell::BarKeyboard`]: hocus_link::ToShell::BarKeyboard
 pub fn bar_keyboard(output: Option<&str>) {
     let now = Instant::now();
-    let effects = match output {
+    match output {
         Some(bar) => {
             let brief = crate::agents::Brief::of(&crate::agents::said().agents);
             let mini = with(|c| c.bars.get(bar).map(|p| p.form)) == Some(Form::Mini);
@@ -1621,17 +1632,15 @@ pub fn bar_keyboard(output: Option<&str>) {
             if mini && brief.needs() > 0 {
                 wanted.push(Item::Secretary);
             }
-            with(|c| c.enter(bar, &wanted, now))
+            acting(|c| c.enter(bar, &wanted, now));
         }
-        None => with(|c| c.leave(now)),
-    };
-    send(effects);
+        None => acting(|c| c.leave(now)),
+    }
 }
 
 /// The actions palette (#736) opens `item`'s popover on `output`'s bar.
 pub fn open_asked(output: &str, item: Item, near: Option<Item>) {
-    let effects = with(|c| c.open_asked(output, item, near, Instant::now()));
-    send(effects);
+    acting(|c| c.open_asked(output, item, near, Instant::now()));
 }
 
 /// The bar a popover for `output` opens on (its name; `output` when the
@@ -1652,52 +1661,51 @@ pub(crate) fn open_settings_searching(query: &str) {
 
 /// The notifications' history opens on `output`'s bar (5.11's summary).
 pub fn open_history(output: &str) {
-    let effects = with(|c| c.open_history(output, Instant::now()));
-    send(effects);
+    acting(|c| c.open_history(output, Instant::now()));
 }
 
 /// `Super+V` (5.6): the clipboard's history opens on `output`'s bar, or
 /// closes.
 /// The agents' journal opens on `output`'s bar (the Settings asked).
 pub fn open_journal(output: &str) {
-    let effects = with(|c| c.open_journal(output, Instant::now()));
-    send(effects);
+    acting(|c| c.open_journal(output, Instant::now()));
     changed(Item::Journal);
 }
 
 pub fn toggle_clipboard(output: &str) {
-    let effects = with(|c| c.toggle_clipboard(output, Instant::now()));
-    send(effects);
+    acting(|c| c.toggle_clipboard(output, Instant::now()));
 }
 
 /// What `item`'s popover shows changed: if it is open, it draws again, to
 /// its new size if that changed.
 pub fn changed(item: Item) {
-    let (open, mut effects) = with(|c| {
-        let open = c.open_item() == Some(item);
-        (open, if open { c.refit() } else { Vec::new() })
-    });
-    if open {
+    // Sent under the controller, as [`acting`] does.
+    with(|c| {
+        if c.open_item() != Some(item) {
+            return;
+        }
+        let mut effects = c.refit();
         // A kit surface's view is built again as it next draws (#770).
         crate::ui::touch();
         effects.push(Effect::Wake(POPOVER_NAMESPACE));
         send(effects);
-    }
+    });
 }
 
 /// `item`'s popover, as it draws, finds it needs another size: resized,
 /// without being woken again.
 pub fn refit(item: Item) {
-    let effects = with(|c| {
-        if c.open_item() == Some(item) {
+    // Sent under the controller, as [`acting`] does.
+    with(|c| {
+        let effects = if c.open_item() == Some(item) {
             c.refit()
         } else {
             Vec::new()
+        };
+        if !effects.is_empty() {
+            send(effects);
         }
     });
-    if !effects.is_empty() {
-        send(effects);
-    }
 }
 
 /// Lines to the compositor, once linked; `None`: a shell alone.
