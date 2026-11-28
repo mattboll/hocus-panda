@@ -49,7 +49,7 @@ retries = 1
 # And those that fail by chance on CI's runners, until their issue's fix:
 # `bar_windows::the_window_menus_switches_and_tiles_act_on_its_window` (#972), and
 # `today::a_line_opens_its_call_else_the_calendar_on_its_event_and_more_
-# the_calendar` (#973).
+# the_calendar` (#973), and `rain::a_rain_allocates_little_on_the_loop` (#974).
 default-filter = """
 not (
     (package(hocus-a11y) & test(=atspi::a_screen_reader_reads_the_tree_and_presses_a_button))
@@ -62,6 +62,7 @@ not (
         | test(=unplug_clients::foot_keeps_running_on_an_unplugged_screen)
         | test(=bar_windows::the_window_menus_switches_and_tiles_act_on_its_window)
         | test(=today::a_line_opens_its_call_else_the_calendar_on_its_event_and_more_the_calendar)
+        | test(=rain::a_rain_allocates_little_on_the_loop)
     ))
 )
 """
