@@ -24,7 +24,9 @@
 //!   terminal in its folder, #952), and put back: its screen (a screen not there: where it
 //!   waited for it, that screen here, else the same share of the screen
 //!   it opened on, the same-numbered desktop; waiting for its screen as
-//!   one unplugged, §12), its desktop, place and state.
+//!   one unplugged, §12), its desktop, place and state. A terminal that
+//!   ran herdr or an agent as the session ended starts running it again,
+//!   as a project's (projects.md §8.1, #967).
 //!   After [`PATIENCE`], the places not taken are dropped.
 //! - An application that could not start (no entry, its program would not
 //!   run, it ended in error before a window) is skipped; once every
@@ -146,13 +148,15 @@ pub struct SavedWindow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub browser: Option<crate::browsers::SavedBrowser>,
     /// The conversation of the agent that ran in this terminal (§8.1),
-    /// which it resumes: on a project's desktop only. Its terminal is the
-    /// agent's then, not saved as a plain terminal.
+    /// which it resumes: saved as the session ends or a project closes
+    /// (#967). Its terminal is the agent's then, not saved as a plain
+    /// terminal.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<crate::resume::SavedAgent>,
-    /// The herdr session this terminal showed (#887), on a project's
-    /// desktop only: it attaches to it again, or, the session gone, its
-    /// agents' conversations resume each in a terminal of its own.
+    /// The herdr session this terminal showed (#887), saved as the
+    /// session ends or a project closes (#967): it attaches to it again,
+    /// or, the session gone, its agents' conversations resume each in a
+    /// terminal of its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub herdr: Option<crate::resume::SavedHerdr>,
     /// Its client's process, for its thread to read a terminal's folder;
@@ -1538,8 +1542,8 @@ impl State {
         let Some(saver) = &self.session_restore.saver else {
             return;
         };
-        // At the session's end, the agents on a project's desktop with
-        // their conversations (§8, §9).
+        // At the session's end, the terminals running herdr or an agent
+        // with their session or conversation (projects.md §8.1, #967).
         let snapshot = (self.session_snapshot(again), self.session_projects());
         if !again && self.session_restore.last.as_ref() == Some(&snapshot) {
             return;
@@ -1657,13 +1661,11 @@ impl State {
         } else {
             (Vec::new(), Vec::new())
         };
+        // A terminal running herdr or an agent, on any desktop, comes back
+        // running it, as a project's does (#967).
         for id in self.windows.keys() {
             if let Some(saved) = self.session_window(*id) {
-                if self.project_of(*id).is_some() {
-                    out.extend(with_agents(*id, saved, &conversations, &herdr));
-                } else {
-                    out.push(saved);
-                }
+                out.extend(with_agents(*id, saved, &conversations, &herdr));
             }
         }
         match &self.session_restore.phase {

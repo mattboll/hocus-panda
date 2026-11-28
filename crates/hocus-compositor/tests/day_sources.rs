@@ -655,8 +655,9 @@ fn choose_opens_step_1_beside_the_card_without_online_accounts_google_is_disable
     let Some(mut bed) = Bed::start("step-1", "1920x1080", "", With::default())? else {
         return Ok(());
     };
-    let card = common::drawn(&mut bed.hp, TASKS_NAMESPACE)?[0].1;
     let pop = bed.open()?;
+    // The card as it was clicked, drawn where it shows.
+    let card = common::drawn(&mut bed.hp, TASKS_NAMESPACE)?[0].1;
     // 320 wide, 8 px left of the bar, its top on the card's.
     assert_eq!(pop.width, 320);
     assert_eq!(pop.x + pop.width, 1920 - 8 - 196 - 8);
@@ -670,6 +671,15 @@ fn choose_opens_step_1_beside_the_card_without_online_accounts_google_is_disable
         "title=«Ajouter un compte»",
     ])?;
     assert!(line.contains("buttons=«Fermer»"), "{line}");
+    // Once it shows that (Online Accounts answered as it opened, a resize),
+    // its top still on the card's (#969: the resize was lost, the popover
+    // stayed short and 16 px too low).
+    let beside = bed.hp.dispatch_until(WAIT, |hp| {
+        common::drawn_popovers(hp)
+            .first()
+            .is_some_and(|p| p.y == card.y + 5)
+    })?;
+    assert!(beside, "{:?} {card:?}", bed.hp.popover_surfaces());
     bed.target("Planka")?;
     let dump = common::last_json(&bed.log, " shows {").unwrap_or_default();
     let last = dump.to_string();

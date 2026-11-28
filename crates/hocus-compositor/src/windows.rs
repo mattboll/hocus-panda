@@ -554,6 +554,8 @@ impl State {
         let elsewhere = desktop != current;
         // Opening out of sight, it takes no focus.
         let takes_focus = self.takes_focus(&window) && !elsewhere;
+        // What the user opened shows: the pointer is no longer busy.
+        self.opened();
         // A dialog opens above its parent (#595).
         let parent = match window.wl_surface().and_then(|s| self.dialog_of(&s)) {
             Some(crate::foreign::DialogOf::Window(parent)) => Some(parent),
@@ -1872,11 +1874,16 @@ impl State {
     }
 
     /// Activation asked with a token the desktop or the user's input
-    /// gave: the window comes forward, back from minimised. Otherwise its
-    /// rim pulses once.
-    pub fn activate(&mut self, id: WindowId, allowed: bool) {
+    /// gave: the window comes forward, back from minimised, its desktop
+    /// switched to on its screen, whichever screen that is (#966).
+    /// Otherwise its rim pulses once. Either way, what the user opened
+    /// has shown: the pointer is no longer busy.
+    pub fn activate(&mut self, id: WindowId, allowed: bool) -> Activated {
+        self.opened();
         if allowed {
+            let elsewhere = !self.on_current_desktop(id);
             self.bring(id);
+            Activated::Forward { elsewhere }
         } else if self.model.focused() != Some(id) {
             let now = self.now();
             let ring = self.going_moves();
@@ -1884,6 +1891,9 @@ impl State {
                 managed.pulse = Some((Tween::new(now, motion::PULSE, Bezier::LINEAR), ring));
             }
             self.redraw = true;
+            Activated::Pulsed
+        } else {
+            Activated::HadTheFocus
         }
     }
 
@@ -1923,6 +1933,17 @@ impl State {
             }
         }
     }
+}
+
+/// What an activation did, for the session's log (#966).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Activated {
+    /// It came forward, its desktop switched to when `elsewhere`.
+    Forward { elsewhere: bool },
+    /// Its rim pulsed; the focus stayed.
+    Pulsed,
+    /// Not allowed, and it had the focus already.
+    HadTheFocus,
 }
 
 /// A toplevel's size and states: tiled when snapped, maximised,

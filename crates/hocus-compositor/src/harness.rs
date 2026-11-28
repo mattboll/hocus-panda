@@ -1422,6 +1422,13 @@ impl Headless {
         drawn.is_some_and(|at| state.capture.editor_at_rest(at))
     }
 
+    /// Whether the pointer shows busy: something the user opened has not
+    /// shown yet (#966).
+    pub fn busy_cursor(&self) -> bool {
+        self.app.state.shown_cursor()
+            == crate::cursor::Shown::Named(smithay::input::pointer::CursorIcon::Progress)
+    }
+
     /// The cursor the compositor shows over a frame, a grip or the
     /// capture, by its name (`crosshair`, `move`, `nwse-resize`…).
     pub fn frame_cursor(&self) -> Option<String> {

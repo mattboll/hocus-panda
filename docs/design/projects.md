@@ -308,8 +308,9 @@ All of this is read by a worker thread, never on the loop: the loop
 hands it the windows' snapshot (ids, app ids, titles, client pids) and
 gets owned results back through a channel. Nothing is read at rest:
 only when a project closes, when the session saves (its 3 s after a
-change, windows.md §14; for windows on a project's desktop only, and
-the tabs and agents only at log out), and when a card opens.
+change, windows.md §14; the tabs, agents and herdr sessions only at
+log out, for the windows of every desktop since #967), and when a card
+opens.
 
 ### 8.1 Agents (lot D)
 
@@ -357,8 +358,10 @@ the tabs and agents only at log out), and when a card opens.
 - **A terminal** is a window whose desktop entry has `Terminal` in its
   `Categories`, or whose app id is in the table below.
 - **Its folder**: the client's process (the Wayland client's credentials;
-  X11's `_NET_WM_PID`), its children that have a controlling terminal
-  (the shells), and their `/proc/PID/cwd`. One shell: its folder. A
+  X11's `_NET_WM_PID`), its children that lead a session of their own on
+  a controlling terminal (the shells; kitty's `kitten` helpers, on its
+  own terminal in the folder it started in, are not, #967), and the
+  `/proc/PID/cwd` of the program in each one's foreground, else its own. One shell: its folder. A
   terminal serving several windows from one process (`footclient`'s
   server, kitty's single instance, `gnome-terminal-server`, wezterm's
   mux) cannot tell which shell is whose: each of its windows gets the
@@ -937,7 +940,8 @@ A comes first; B needs A; C and D need B and not each other.
 - **Saved** as `[window.agent]` (`tool`, `session`, `folder`, `transcript`,
   `first-prompt`) with the terminal's entry and place, no
   `[window.terminal]`: as the project closes, and at log out for the
-  windows on a project's desktop.
+  windows on a project's desktop (on every desktop since #967,
+  windows.md §14 "Terminals").
 - **Brought back** (`crates/hocus-compositor/src/resume.rs`): the terminal
   in the folder, its table's command (`terminals::with_command`, §8.2:
   `-- CMD…`, `-e CMD…`, `-x CMD…`, kitty's bare, Ptyxis' one quoted word)

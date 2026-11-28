@@ -487,6 +487,14 @@ pub enum Shows {
         app_id: &'static str,
         size: (u32, u32),
     },
+    /// An xdg toplevel of this size where a link opens on a click: at
+    /// each left press, it asks for an activation token with the press's
+    /// serial, for the program that opens the link
+    /// ([`Event::Token`]), as a chat application or a terminal does.
+    Linking {
+        app_id: &'static str,
+        size: (u32, u32),
+    },
     /// An xdg toplevel of this size that takes the pointer and the
     /// keyboard and says what they get ([`Event::Pointer`],
     /// [`Event::Key`]), as any application does.
@@ -679,6 +687,9 @@ pub enum Event {
     KdeMode {
         server: bool,
     },
+    /// The activation token a linking client got for its click
+    /// ([`Shows::Linking`]).
+    Token(String),
 }
 
 /// What a pointing client's pointer got ([`Shows::Pointing`]).
@@ -779,6 +790,7 @@ fn run_client(
         popup_on_press: false,
         hiding: false,
         pointing: false,
+        linking: false,
         acted: None,
         moving: None,
         dragging: None,
@@ -886,6 +898,16 @@ fn run_client(
             client.size = size;
             client.window = Some(window);
             client.pointing = true;
+        }
+        Some(Shows::Linking { app_id, size }) => {
+            let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
+            let surface = client.compositor.create_surface(&qh);
+            let window = xdg.create_window(surface, WindowDecorations::RequestServer, &qh);
+            window.set_app_id(app_id);
+            window.commit();
+            client.size = size;
+            client.window = Some(window);
+            client.linking = true;
         }
         Some(Shows::Listening { app_id, size }) => {
             let xdg = client.xdg.as_ref().context("no xdg_wm_base")?;
@@ -1292,6 +1314,8 @@ struct Client {
     hiding: bool,
     /// Says what its pointer gets ([`Shows::Pointing`]).
     pointing: bool,
+    /// Asks for a token at each left press ([`Shows::Linking`]).
+    linking: bool,
     /// An acted client's, and whether its text inputs take a password
     /// ([`Shows::Acted`]).
     acted: Option<bool>,
@@ -1679,6 +1703,7 @@ impl SeatHandler for Client {
             && (self.popup_on_press
                 || self.hiding
                 || self.pointing
+                || self.linking
                 || self.moving.is_some()
                 || self.dragging.is_some())
         {
@@ -1766,6 +1791,26 @@ impl PointerHandler for Client {
                     PointerEventKind::Release { .. } => *pressed = None,
                     _ => {}
                 }
+            }
+            if let (
+                true,
+                PointerEventKind::Press {
+                    button: BTN_LEFT,
+                    serial,
+                    ..
+                },
+                Some(activation),
+                Some(seat),
+            ) = (self.linking, &event.kind, &self.activation, &self.seat)
+            {
+                activation.request_token(
+                    qh,
+                    RequestData {
+                        app_id: None,
+                        seat_and_serial: Some((seat.clone(), *serial)),
+                        surface: self.window.as_ref().map(|w| w.wl_surface().clone()),
+                    },
+                );
             }
             match event.kind {
                 PointerEventKind::Enter { serial } if self.hiding => {
@@ -1877,9 +1922,12 @@ delegate_activation!(Client);
 impl ActivationHandler for Client {
     type RequestData = RequestData;
 
-    /// The token it asked for: its window asks for the focus with it.
+    /// The token it asked for: a linking client's is for another program
+    /// ([`Event::Token`]); otherwise its window asks for the focus with it.
     fn new_token(&mut self, token: String, data: &RequestData) {
-        if let (Some(activation), Some(surface)) = (&self.activation, &data.surface) {
+        if self.linking {
+            let _ = self.events.send(Event::Token(token));
+        } else if let (Some(activation), Some(surface)) = (&self.activation, &data.surface) {
             activation.activate::<Client>(surface, token);
         }
     }

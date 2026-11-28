@@ -425,8 +425,9 @@ impl State {
             .cloned()
     }
 
-    /// The shell asks for an application: started off the loop, its
-    /// first window taking the focus.
+    /// The shell asks for an application (or `xdg-open` for an address,
+    /// a file): started off the loop, its first window taking the focus,
+    /// the pointer busy until it shows (#966).
     pub fn launch(&mut self, launch: Launch) {
         tracing::info!(
             app = launch.id,
@@ -434,6 +435,7 @@ impl State {
             "the launcher starts"
         );
         self.arrivals.spawned_at = Some(self.now());
+        self.opening("the launcher");
         let env = programs::Env::of(self).with_activation(self.activation_token());
         let terminal = launch
             .terminal
