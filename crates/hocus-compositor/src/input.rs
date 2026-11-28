@@ -1037,7 +1037,17 @@ impl State {
                 self.grip_press(id, button, at, serial);
                 return;
             } else if let Some(id) = self.window_under(at) {
+                let entered = self.seat.get_keyboard().and_then(|k| k.last_enter());
                 self.focus(Some(id));
+                // The press gave its client the keyboard, which entered
+                // after it: a token asked with the press's serial is the
+                // user's still (a link clicked in a window without the
+                // focus, #966).
+                if let Some(enter) = self.seat.get_keyboard().and_then(|k| k.last_enter())
+                    && Some(enter) != entered
+                {
+                    self.pointer.focusing_press = Some((serial, enter));
+                }
                 let modifiers = self.seat.get_keyboard().map(|k| k.modifier_state());
                 if button == BTN_LEFT && modifiers.is_some_and(|m| self.move_modifier(&m)) {
                     self.start_move(id, button, None, serial);

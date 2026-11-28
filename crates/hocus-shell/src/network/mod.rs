@@ -174,31 +174,31 @@ pub fn ask(ask: Ask) {
 }
 
 /// The program that opens a web page: `HOCUS_OPENER` for tests, else
-/// `xdg-open`.
-fn opener() -> String {
-    std::env::var("HOCUS_OPENER").unwrap_or_else(|_| "xdg-open".to_owned())
+/// `xdg-open` in `PATH`.
+fn opener() -> Option<String> {
+    std::env::var("HOCUS_OPENER")
+        .ok()
+        .or_else(|| crate::launcher::program("xdg-open"))
 }
 
 /// Opens `uri` in the user's browser: a sign-in page shows itself there
-/// when NetworkManager's check address is asked for behind it. The program
-/// runs on a thread of its own, which waits for it: never the loop that
-/// draws.
-pub fn open_in_browser(uri: String) {
-    let program = opener();
-    let started = std::thread::Builder::new()
-        .name("opener".to_owned())
-        .spawn(move || {
-            let child = std::process::Command::new(&program)
-                .arg(&uri)
-                .stdin(std::process::Stdio::null())
-                .spawn();
-            match child.and_then(|mut child| child.wait()) {
-                Ok(status) if status.success() => {}
-                Ok(status) => tracing::warn!(program, %status, "the browser did not open"),
-                Err(err) => tracing::warn!(program, %err, "the browser did not open"),
-            }
-        });
-    if let Err(err) = started {
-        tracing::warn!(%err, "cannot open the browser");
+/// when NetworkManager's check address is asked for behind it. Started by
+/// the compositor, as the launcher's addresses are: off its loop, with an
+/// activation token, so that the browser comes forward (#966).
+pub fn open_in_browser(uri: String) -> Option<hocus_link::Launch> {
+    let Some(program) = opener() else {
+        tracing::warn!("no xdg-open in PATH: the sign-in page does not open");
+        return None;
+    };
+    let launch = hocus_link::Launch {
+        id: "xdg-open".to_owned(),
+        terminal: false,
+        dir: String::new(),
+        argv: vec![program, uri],
+    };
+    if !launch.fits() {
+        tracing::warn!("a sign-in address that cannot be sent: not opened");
+        return None;
     }
+    Some(launch)
 }
