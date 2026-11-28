@@ -7,7 +7,8 @@ use smithay::{
     delegate_pointer_gestures, delegate_presentation, delegate_relative_pointer,
     delegate_viewporter, delegate_xdg_activation,
     input::Seat,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    reexports::wayland_server::protocol::{wl_seat::WlSeat, wl_surface::WlSurface},
+    utils::Serial,
     wayland::{
         compositor::with_states,
         fractional_scale::{FractionalScaleHandler, with_fractional_scale},
@@ -23,7 +24,7 @@ use smithay::{
     },
 };
 
-use crate::State;
+use crate::{State, windows::Activated};
 
 /// How long a token is kept when no window uses it, and how long it lets
 /// a window take the focus.
@@ -36,15 +37,24 @@ impl XdgActivationHandler for State {
     }
 
     /// A client asks for a token: it may focus a window if the client had
-    /// the keyboard when the user pressed what asked for it.
+    /// the keyboard when the user pressed what asked for it. Made from the
+    /// user's click or key, it is for something the user opens (a link, a
+    /// file): the pointer is busy until that shows (#966).
     fn token_created(&mut self, token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
-        let valid = data.serial.as_ref().is_some_and(|(serial, seat)| {
-            Seat::<State>::from_resource(seat)
-                .and_then(|seat| seat.get_keyboard())
-                .and_then(|k| k.last_enter())
-                .is_some_and(|last| serial.is_no_older_than(&last))
-        });
+        let valid = data
+            .serial
+            .as_ref()
+            .is_some_and(|(serial, seat)| self.serial_of_the_users_input(*serial, seat));
+        tracing::debug!(
+            valid,
+            from_input = data.serial.is_some(),
+            app = data.app_id.as_deref().unwrap_or_default(),
+            "an activation token made"
+        );
         self.keep_token(token.to_string(), valid);
+        if valid {
+            self.opening("an application's token");
+        }
         true
     }
 
@@ -53,7 +63,9 @@ impl XdgActivationHandler for State {
     /// after a click on its application's tray icon (5.14b), or as the
     /// dialog of the window with the focus or of the shell (the desktop
     /// portal's, whose token comes from no input of its own: #595), it
-    /// comes forward; otherwise its rim pulses (§4).
+    /// comes forward, from another desktop or screen too (#966);
+    /// otherwise its rim pulses (§4). Each ask is said in the session's
+    /// log: who, which window, the token, what was done.
     fn request_activation(
         &mut self,
         token: XdgActivationToken,
@@ -61,35 +73,98 @@ impl XdgActivationHandler for State {
         surface: WlSurface,
     ) {
         let now: std::time::Duration = self.clock.now().into();
-        let by_token = self
-            .arrivals
-            .activation_tokens
-            .remove(token.as_str())
-            .is_some_and(|(made, valid)| valid && now.saturating_sub(made) < TOKEN_FOCUSES);
-        self.protocols.activation_state.remove_token(&token);
-        let allowed = if by_token {
-            self.tray_token_used(token.as_str());
-            true
-        } else if self.dialog_focuses(&surface) {
-            true
-        } else {
-            let pid = self.client_pid(&surface);
-            self.tray_click_focuses(pid)
+        let said = match self.arrivals.activation_tokens.remove(token.as_str()) {
+            Some((_, false)) => TokenSaid::NotFromInput,
+            Some((made, true)) if now.saturating_sub(made) >= TOKEN_FOCUSES => TokenSaid::Stale,
+            Some(_) => TokenSaid::Valid,
+            None => TokenSaid::Unknown,
         };
-        let window = self.window_for(&surface).and_then(|w| self.id_of(&w));
-        tracing::debug!(allowed, ?window, "activation asked");
-        match window {
-            Some(id) => self.activate(id, allowed),
+        self.protocols.activation_state.remove_token(&token);
+        let pid = self.client_pid(&surface);
+        let allowed = if said == TokenSaid::Valid {
+            self.tray_token_used(token.as_str());
+            Some("token")
+        } else if self.dialog_focuses(&surface) {
+            Some("dialog")
+        } else if self.tray_click_focuses(pid) {
+            Some("tray click")
+        } else {
+            None
+        };
+        let mapped = self.window_for(&surface);
+        let window = mapped.as_ref().and_then(|w| self.id_of(w));
+        let app = mapped.as_ref().and_then(crate::windows::app_id);
+        let done = match window {
+            Some(id) => match self.activate(id, allowed.is_some()) {
+                Activated::Forward { elsewhere: true } => "came forward, its desktop shown",
+                Activated::Forward { elsewhere: false } => "came forward",
+                Activated::Pulsed => "pulsed",
+                Activated::HadTheFocus => "had the focus",
+            },
             // Asked before its first frame: it opens focused.
-            None if allowed && self.window_for(&surface).is_some() => {
+            None if allowed.is_some() && mapped.is_some() => {
                 self.arrivals.activate_on_map.push(surface);
+                "focused when it maps"
             }
-            None => {}
+            None if mapped.is_some() => "opens behind",
+            None => "refused: no window",
+        };
+        tracing::info!(
+            app = app.as_deref().unwrap_or_default(),
+            ?pid,
+            window = window.map(|w| w.0),
+            token = said.says(),
+            by = allowed.unwrap_or("nothing"),
+            done,
+            "activation asked"
+        );
+    }
+}
+
+/// What a token asking for the focus was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenSaid {
+    /// Made from the user's input, or by the desktop, in the last 10 s.
+    Valid,
+    /// Made from the user's input or by the desktop, but too long ago.
+    Stale,
+    /// Made from no input of the user's.
+    NotFromInput,
+    /// Never made, or used already.
+    Unknown,
+}
+
+impl TokenSaid {
+    fn says(self) -> &'static str {
+        match self {
+            Self::Valid => "valid",
+            Self::Stale => "stale",
+            Self::NotFromInput => "not from input",
+            Self::Unknown => "unknown",
         }
     }
 }
 
 impl State {
+    /// Whether `serial` is of the user's input to the client with the
+    /// keyboard: no older than the keyboard's entering it, or the press
+    /// that gave it the keyboard, which comes just before (a link clicked
+    /// in a window without the focus).
+    fn serial_of_the_users_input(&self, serial: Serial, seat: &WlSeat) -> bool {
+        let Some(keyboard) = Seat::<State>::from_resource(seat).and_then(|s| s.get_keyboard())
+        else {
+            return false;
+        };
+        let Some(entered) = keyboard.last_enter() else {
+            return false;
+        };
+        let since = match self.pointer.focusing_press {
+            Some((press, enter)) if enter == entered => press,
+            _ => entered,
+        };
+        serial.is_no_older_than(&since)
+    }
+
     fn keep_token(&mut self, token: String, valid: bool) {
         let now = self.clock.now().into();
         self.arrivals

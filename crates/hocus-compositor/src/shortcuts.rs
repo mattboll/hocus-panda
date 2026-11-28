@@ -589,6 +589,7 @@ impl State {
             Action::Terminal => {
                 // The window it opens takes the focus (§4).
                 self.arrivals.spawned_at = Some(self.now());
+                self.opening("the terminal's shortcut");
                 let env = programs::Env::of(self).with_activation(self.activation_token());
                 programs::spawn_terminal(self.config.programs.terminal.clone(), env);
             }

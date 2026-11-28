@@ -1283,7 +1283,11 @@ fn act(target: Target, network: &Network, motion: bool) {
         Target::Portal => {
             if let Some(uri) = network.check_uri.clone() {
                 tracing::info!("the sign-in page opens in the browser");
-                network::open_in_browser(uri);
+                if let Some(launch) = network::open_in_browser(uri) {
+                    super::send(vec![super::Effect::Tell(hocus_link::ToCompositor::Launch(
+                        launch,
+                    ))]);
+                }
             }
         }
         Target::Row(i) => {

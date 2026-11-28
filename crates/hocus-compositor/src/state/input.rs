@@ -11,7 +11,7 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Point},
+    utils::{Logical, Point, Serial},
 };
 
 use crate::{cursor::CursorImages, model::WindowId, popups::PopupGrab};
@@ -38,6 +38,12 @@ pub struct Pointer {
     /// What the pointer shows, as the client under it sets it.
     pub cursor: CursorImageStatus,
     pub cursor_images: CursorImages,
+    /// Something the user opened has not shown yet (#966).
+    pub busy: crate::busy::Busy,
+    /// The last press that gave a client the keyboard, and the keyboard's
+    /// entering after it: the press's serial is the user's input to that
+    /// client (its activation tokens, #966).
+    pub focusing_press: Option<(Serial, Serial)>,
 }
 
 #[derive(Debug)]
@@ -104,6 +110,8 @@ impl Pointer {
             popup_grab: None,
             cursor: CursorImageStatus::default_named(),
             cursor_images,
+            busy: crate::busy::Busy::Idle,
+            focusing_press: None,
         }
     }
 }

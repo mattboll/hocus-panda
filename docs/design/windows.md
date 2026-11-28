@@ -113,6 +113,27 @@ sessions).
   click on an application's tray icon is the user's too: its application
   may focus one window within 2 s, asking or opening it (bar.md, as
   built, 5.14b).
+- **A window asked to come forward** (xdg-activation; #966, the
+  maintainer's decision): with a valid token from the user's click or
+  key (a link clicked in a chat or a terminal, the browser asked through
+  `xdg-open` with its `XDG_ACTIVATION_TOKEN`; a token made in the last
+  10 s), it comes forward even on another desktop or another screen: that
+  screen switches to its desktop and it takes the focus, as a window gone
+  to from an agent's row does, without the streak. The press that gives
+  a window the keyboard counts as the user's input to it: a link clicked
+  in a window without the focus gives a valid token. Without a valid
+  token it pulses and the focus stays. Each request is a line of the
+  session's log (`activation asked`): the application, the window, the
+  token (valid, stale, not from input, unknown), what allowed it, what
+  was done.
+- **While what was opened is slow to show** (#966): from a valid token
+  made from the user's input, or a program the desktop starts for the
+  user (the launcher's applications, addresses and files, the terminal's
+  shortcut, a transcript's file), the pointer shows the theme's
+  `progress` shape until a window appears or one comes forward (or
+  pulses), 5 s at most; not where a client hid the pointer, nor over a
+  grab's or a frame's own shape. Nothing else shows (no pulse in the
+  bar, no toast).
 - **Dialogs** (#595): a window that is another's dialog opens just
   above its parent and stays above it when the parent is raised. Its
   parent is its xdg parent (`xdg_toplevel.set_parent`, from its own

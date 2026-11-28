@@ -39,6 +39,7 @@ mod timedate;
 mod udisks;
 
 mod actions;
+mod activation;
 mod agents;
 mod agents_live;
 mod all_desktops;

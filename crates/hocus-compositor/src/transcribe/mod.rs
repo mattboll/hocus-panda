@@ -563,6 +563,7 @@ impl State {
             tracing::warn!(path = %path.display(), "a path that cannot be opened");
             return;
         }
+        self.opening("a transcript opened");
         let env = programs::Env::of(self).with_activation(self.activation_token());
         programs::launch(launch, None, env);
     }

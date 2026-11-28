@@ -392,13 +392,16 @@ impl State {
         }
     }
 
-    /// What the pointer shows: what the client under it set.
+    /// What the pointer shows: what the client under it set, or busy
+    /// while something the user opened has not shown (#966), but where
+    /// the client hid it.
     pub fn shown_cursor(&self) -> Shown<'_> {
         if let Some(icon) = self.pointer.frame_cursor {
             return Shown::Named(icon);
         }
         match &self.pointer.cursor {
             CursorImageStatus::Hidden => Shown::Hidden,
+            _ if self.pointer_busy() => Shown::Named(CursorIcon::Progress),
             CursorImageStatus::Surface(surface) => Shown::Surface(surface),
             CursorImageStatus::Named(icon) => Shown::Named(*icon),
         }

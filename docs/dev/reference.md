@@ -41,6 +41,14 @@ where it does; on a virtual terminal, each into a journal stream of its
 own: the desktop's under `hocuspanda`, an application under its id or
 program (docs/architecture.md, "Where logs go").
 
+A window asked to come forward is one line, `activation asked`: its
+application, process and window, its token (valid, stale, not from
+input, unknown), what allowed it (`token`, `dialog`, `tray click`,
+`nothing`) and what was done (came forward, its desktop shown; pulsed…);
+`journalctl --user -t hocuspanda -g 'activation asked'` collects the
+cases of a link that opened out of sight (#966). Its test file is
+`activation`.
+
 ## The compositor's configuration
 
 Its configuration is `$XDG_CONFIG_HOME/hocuspanda/config.toml` (or

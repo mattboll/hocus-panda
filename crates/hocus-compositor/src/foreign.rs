@@ -233,7 +233,7 @@ impl State {
         };
         self.model.set_parent(id, parent);
         if self.dialog_focuses(surface) && self.model.focused() != Some(id) {
-            self.activate(id, true);
+            let _ = self.activate(id, true);
         } else if let Some(focused) = self.model.focused() {
             // Re-raised, the focused window takes its dialogs above it.
             self.model.raise(focused);
